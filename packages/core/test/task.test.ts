@@ -188,7 +188,7 @@ describe('taskReducer', () => {
     expect(review('unheard-of').status).toBe('open');
   });
 
-  it('opens bidding on the first bid and never reopens an awarded task', () => {
+  it('records bids without changing status and never reopens an awarded task', () => {
     let state = taskReducer(
       initialTaskState(AGG),
       makeEvent({
@@ -203,19 +203,21 @@ describe('taskReducer', () => {
       state,
       makeEvent({
         seq: 2,
-        version: 2,
+        version: 1,
         type: 'task.bid.placed',
         aggregateId: AGG,
         payload: { bidId: 'bid_1', agentId: 'agt_1', price: 10 },
       }),
     );
-    expect(state.status).toBe('bidding');
+    // Bidding no longer changes the status; the window is opened at publish.
+    expect(state.status).toBe('open');
+    expect(Object.keys(state.bids)).toEqual(['bid_1']);
 
     state = taskReducer(
       state,
       makeEvent({
         seq: 3,
-        version: 3,
+        version: 2,
         type: 'task.awarded',
         aggregateId: AGG,
         payload: { awardeeId: 'agt_1', awardedBy: 'admin' },
@@ -225,7 +227,7 @@ describe('taskReducer', () => {
       state,
       makeEvent({
         seq: 4,
-        version: 4,
+        version: 2,
         type: 'task.bid.placed',
         aggregateId: AGG,
         payload: { bidId: 'bid_2', agentId: 'agt_2', price: 5 },

@@ -518,7 +518,7 @@ describe('task lifecycle state machine', () => {
     expect(h.events.loadAggregate(`task:${task.id}`)).toHaveLength(6);
   });
 
-  it('cancels only open tasks (MVP cancel policy)', async () => {
+  it('allows cancel from open/bidding but not from active ownership states', async () => {
     const h = makeHarness();
     const root = await h.register('root', 'admin');
     const published = resultOf<PublishResult>(await publish(h, root.token, { title: 'cancel me' }));
@@ -539,8 +539,8 @@ describe('task lifecycle state machine', () => {
       reason: 'no longer needed',
     });
 
-    // awarded / in_progress / review / bidding may not be cancelled directly.
-    for (const blockedFrom of ['bidding', 'awarded', 'in_progress', 'review'] as TaskStatus[]) {
+    // awarded / in_progress / review may not be cancelled directly.
+    for (const blockedFrom of ['awarded', 'in_progress', 'review'] as TaskStatus[]) {
       const other = resultOf<PublishResult>(
         await publish(h, root.token, { title: `stuck in ${blockedFrom}` }),
       );
@@ -560,6 +560,9 @@ describe('task lifecycle state machine', () => {
       expect(err.data).toMatchObject({ from: blockedFrom, to: 'cancelled' });
       expect(h.service.get(other.task.id).status).toBe(blockedFrom);
     }
+
+    // `bidding → cancelled` is the window-close edge (see closeExpiredBidding).
+    expect(canTransition('bidding', 'cancelled')).toBe(true);
   });
 
   it('allows failed from any active state but not from a terminal one', () => {

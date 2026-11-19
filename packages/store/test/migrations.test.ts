@@ -41,8 +41,9 @@ describe('migrations', () => {
       'store_hardening',
       'account_credentials',
       'event_log_integrity',
+      'bid_events_per_version',
     ]);
-    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('is idempotent: a second run applies nothing and does not throw', () => {
@@ -50,7 +51,7 @@ describe('migrations', () => {
     const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(listAppliedMigrations(db)).toHaveLength(5);
+    expect(listAppliedMigrations(db)).toHaveLength(6);
 
     // Third run on the same handle: still fine.
     expect(() => runMigrations(db)).not.toThrow();
@@ -62,7 +63,7 @@ describe('migrations', () => {
     db.exec('DELETE FROM schema_version');
     expect(getSchemaVersion(db)).toBe(0);
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 5]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6]);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
   });
 
@@ -105,9 +106,9 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [3, 4, 5], version: 5 });
-    expect(getSchemaVersion(db)).toBe(5);
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(result).toEqual({ applied: [3, 4, 5, 6], version: 6 });
+    expect(getSchemaVersion(db)).toBe(6);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
 
     // Only indexes were added — the table definition is byte-identical.
     const schemaAfter = db
@@ -208,15 +209,32 @@ describe('migrations', () => {
     expect(secretHash?.dflt_value).toBeNull();
   });
 
-  it('adds the event-log version uniqueness backstop (v5)', () => {
+  it('keeps status events unique but allows multiple bid events per version (v6)', () => {
     const { db } = makeStore();
-    expect(indexNames(db, 'events')).toContain('uq_events_aggregate_version');
-    const insert = db.prepare(
+    const indexes = indexNames(db, 'events');
+    expect(indexes).toContain('uq_events_aggregate_version_status');
+    expect(indexes).not.toContain('uq_events_aggregate_version');
+
+    const insertStatus = db.prepare(
       `INSERT INTO events (aggregate_id, type, version, payload, ts)
        VALUES ('task:tsk_1', 'task.published', 1, '{}', 1)`,
     );
-    insert.run();
-    expect(() => insert.run()).toThrow(/UNIQUE constraint failed/);
+    insertStatus.run();
+    expect(() => insertStatus.run()).toThrow(/UNIQUE constraint failed/);
+
+    // Bids are excluded from the partial index: many bids share the task
+    // version because bidding must not churn `tasks.version`.
+    const insertBid = db.prepare(
+      `INSERT INTO events (aggregate_id, type, version, payload, ts)
+       VALUES ('task:tsk_1', 'task.bid.placed', 1, '{}', 2)`,
+    );
+    insertBid.run();
+    expect(() => insertBid.run()).not.toThrow();
+    const insertNotification = db.prepare(
+      `INSERT INTO events (aggregate_id, type, version, payload, ts)
+       VALUES ('task:tsk_1', 'task.bid.received', 1, '{}', 3)`,
+    );
+    expect(() => insertNotification.run()).not.toThrow();
   });
 
   it('applies v4 idempotently even when the column already exists', () => {
@@ -230,7 +248,7 @@ describe('migrations', () => {
     expect(columnsOf(db, 'accounts').filter((c) => c.name === 'secret_hash')).toHaveLength(1);
 
     // A manual body re-run must not corrupt the ledger.
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(runMigrations(db).applied).toEqual([]);
   });
 
@@ -263,8 +281,8 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [4, 5], version: 5 });
-    expect(getSchemaVersion(db)).toBe(5);
+    expect(result).toEqual({ applied: [4, 5, 6], version: 6 });
+    expect(getSchemaVersion(db)).toBe(6);
     expect(columnsOf(db, 'accounts').map((c) => c.name)).toContain('secret_hash');
 
     const row = db

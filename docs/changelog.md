@@ -2,6 +2,26 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-19 — US-009 收尾（bidding 生命周期 / version / bid 通知）
+
+测试基线：**385**（core 41 / protocol 44 / store 69 / server 231）。
+
+- **决策 1**：`task.publish` 带 `biddingDeadline` 时直接创建为 `bidding`；无则
+  `open`（草稿，不可竞标）。`reclaimExpired` 仍只处理 `open`；新增
+  `closeExpiredBidding()`：窗口到期且无 live bid → `cancelled`，有 bid → 保持
+  `bidding` 等待 award。新增 `bidding → cancelled` 边。
+- **决策 2**：bid 不再更新 `tasks.version`；award 的 `expectedVersion` 在整个窗口
+  内稳定。每次 bid 以当前 version 追加 `task.bid.placed`（审计）+
+  `task.bid.received`（通知）。为避免同版本多条事件被 v5 全量唯一索引拒绝，新增
+  v6 迁移：删除 `uq_events_aggregate_version`，改为部分唯一索引
+  `uq_events_aggregate_version_status`（排除两种 bid 事件）。
+- **决策 3**：`task.bid.received` 在 `withTransaction` 内 append，由帧栈提交后
+  emit；WS 集成测试验证在线 admin 收到实时竞标通知。
+- 新增测试：10 次 bid 后 task version 不变、open 无窗口拒绝竞标、biddingDeadline
+  过期拒绝、窗口关闭取消无 bid 任务、有 bid 保持 bidding、WS `task.bid.received`。
+- 注意：下方 2026-11-19 早先的 US-009 条目中“first bid 打开 bidding / 每次 bid
+  递增 version”的假设已被本节取代。
+
 ## 2026-11-19 — US-009 竞标引擎与授标 CAS
 
 测试基线：**379**（core 41 / protocol 44 / store 69 / server 225）。

@@ -74,6 +74,10 @@ export async function startServer(
       if (reclaimed.length > 0) {
         app.log.info({ count: reclaimed.length, msg: 'task.reclaim.startup' });
       }
+      const { closed } = app.tasks.closeExpiredBidding();
+      if (closed.length > 0) {
+        app.log.info({ count: closed.length, msg: 'task.bidding.closed.startup' });
+      }
     } catch (err) {
       app.log.error({ err: serializeError(err), msg: 'task.reclaim.startup.failed' });
     }

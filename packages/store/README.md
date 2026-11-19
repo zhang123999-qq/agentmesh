@@ -59,9 +59,12 @@ repos.tasks.updateWithVersion(task.id, task.version, { status: 'awarded', assign
 | v3 | `store_hardening` | `uq_messages_seq`（`messages.seq` 全局唯一）+ `uq_channel_members_ws` |
 | v4 | `account_credentials` | `accounts.secret_hash`（nullable，仅存 SHA-256 摘要） |
 | v5 | `event_log_integrity` | `uq_events_aggregate_version`：`(workspace_id, aggregate_id, version)` 唯一，防止多写者产生重复聚合版本 |
+| v6 | `bid_events_per_version` | 删除 v5 全量唯一索引，改为**部分唯一索引** `uq_events_aggregate_version_status`（排除 `task.bid.placed` / `task.bid.received`），允许同一 task version 上有多条竞标事件，同时仍保证状态事件每版本唯一 |
 
 v5 的索引是**强制约束**：如果已有数据库里存在重复的
 `(workspace_id, aggregate_id, version)`，迁移会明确失败而不是静默跳过；先修复重复行再启动。
+v6 起因是竞标设计要求 `tasks.version` 在竞标窗口内保持不变；bid 事件的版本与当前
+task version 相同，因此必须从唯一索引中排除。
 
 v3 只追加索引、不重建表，因此已存在的 v2 库再次 `runMigrations` 只会应用 v3 并保留原有数据；
 空库则 v1→v2→v3 一次到位。

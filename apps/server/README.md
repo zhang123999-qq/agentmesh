@@ -54,10 +54,10 @@ When a store is wired the server registers six task methods:
 
 | Method | Roles | Notes |
 | --- | --- | --- |
-| `task.publish` | `admin` | Creates the task in `open` (version 1) and appends `task.published`. Params: `title` (required), `description?`, `requiredSkills?`, `budget?`, `deadline?` (epoch ms). |
+| `task.publish` | `admin` | Creates the task in `bidding` when `biddingDeadline?` is supplied (the window is open immediately); otherwise `open` (draft, not bid-able). Params: `title` (required), `description?`, `requiredSkills?`, `budget?`, `deadline?`, `biddingDeadline?` (epoch ms). |
 | `task.list` | `admin`, `agent` | Workspace tasks, optional `status` filter and `limit`/`offset` paging. |
 | `task.get` | `admin`, `agent` | One task by `taskId`, **including `version`** for CAS. |
-| `task.bid` | `admin`, `agent` | Params: `taskId`, `price`, `eta?` (minutes), `approach?`, `confidence?` (0–1). Allowed in `open`/`bidding`; the first bid opens `bidding`. Re-bidding overwrites the same live bid. Limit: 5 bids/min per agent (`-32005`). |
+| `task.bid` | `admin`, `agent` | Params: `taskId`, `price`, `eta?` (minutes), `approach?`, `confidence?` (0–1). Only while status is `bidding` and before `biddingDeadline`; re-bidding overwrites the same live bid. Limit: 5 bids/min per agent (`-32005`). |
 | `task.bids` | `admin` | Live bid set for a task, newest last. |
 | `task.award` | `admin` | Params: `taskId`, `expectedVersion`, `awardeeId?`, `strategy?` (`manual`/`auto`). Manual requires the awardee to have a live bid; auto scores all live bids. CAS conflict is `-32007`; success appends exactly one `task.awarded`. |
 
@@ -85,10 +85,15 @@ the future.
 
 ### Bidding and scoring (US-009)
 
-- **Bid window.** `task.bid` is accepted while the task is `open` or `bidding`.
-  The first bid moves `open → bidding` and increments the task aggregate version;
-  every bid event occupies one version (v5 uniqueness). After `awarded` any bid
-  is `-32003` (`reason: "bidding_closed"`).
+- **Bid window.** `task.bid` is accepted only while the task is `bidding` and
+  before `biddingDeadline`. The window is opened at publish time by supplying
+  `biddingDeadline`; `open` is a draft state and is not bid-able. Bids do
+  **not** change `tasks.version`, so `expectedVersion` for `task.award` is
+  stable for the whole window. Each bid appends `task.bid.placed` (audit) and
+  `task.bid.received` (live notification) at the current version; v6's partial
+  unique index allows several bid events per version while keeping status
+  events unique. When `biddingDeadline` passes with no live bids, the window
+  sweeper cancels the task; with bids it stays `bidding` for `task.award`.
 - **Scoring.** Skill 0.35 + history 0.25 + availability 0.10 + price 0.15 +
   ETA 0.15. Weights are configurable and must sum to 1. History shrinks toward
   0.5 with `historyConfidenceThreshold=5`; availability is

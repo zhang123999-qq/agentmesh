@@ -118,7 +118,7 @@ export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]
   Object.freeze({
     draft: ['open'],
     open: ['bidding', 'cancelled'],
-    bidding: ['awarded', 'failed'],
+    bidding: ['awarded', 'failed', 'cancelled'],
     awarded: ['in_progress', 'failed'],
     in_progress: ['review', 'failed'],
     review: ['done', 'failed', 'in_progress'],
@@ -388,6 +388,8 @@ export interface TaskView {
   readonly version: number;
   readonly parentId: string | null;
   readonly deadline: number | null;
+  /** Window close time; non-null means bidding is opened at publish. */
+  readonly biddingDeadline: number | null;
   readonly blockedBy: string[];
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -415,6 +417,12 @@ export interface ReclaimResult {
   readonly count: number;
 }
 
+export interface CloseBiddingResult {
+  /** Tasks cancelled because their bidding window closed with no bids. */
+  readonly closed: TaskView[];
+  readonly count: number;
+}
+
 export interface TransitionOptions {
   /**
    * Version the caller last saw. Required: every lifecycle step is a CAS, so a
@@ -434,6 +442,8 @@ export interface PublishTaskInput {
   readonly requiredSkills?: readonly string[];
   readonly budget?: number;
   readonly deadline?: number;
+  /** When present, the task is created directly in `bidding`. */
+  readonly biddingDeadline?: number;
 }
 
 export interface ListTasksQuery {
@@ -523,6 +533,11 @@ export interface TasksModuleOptions {
   readonly clock?: () => number;
 }
 
+function readBiddingDeadline(meta: Task['meta']): number | null {
+  const raw = meta?.['biddingDeadline'];
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+}
+
 function toView(task: Task): TaskView {
   return {
     id: task.id,
@@ -535,6 +550,7 @@ function toView(task: Task): TaskView {
     version: task.version,
     parentId: task.parentId,
     deadline: task.deadline,
+    biddingDeadline: readBiddingDeadline(task.meta),
     blockedBy: [...task.blockedBy],
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -610,11 +626,13 @@ export class TasksService {
   // ----------------------------------------------------------------- publish
 
   /**
-   * Create a task in `open` and append `task.published`.
+   * Create a task. A `biddingDeadline` opens the bidding window immediately
+   * (`status: bidding`); without one the task stays `open` as a draft that a
+   * window/operator can still act on.
    *
    * The row is born at `version: 1`, the version of the `task.published`
-   * event, so "row version == aggregate version" holds from the first write
-   * and US-009's first CAS can safely send `expectedVersion: 1`.
+   * event. Bids do **not** change this version, so `expectedVersion` for
+   * `task.award` remains stable for the whole bidding window.
    */
   publish(
     input: PublishTaskInput,
@@ -644,6 +662,12 @@ export class TasksService {
     if (input.deadline !== undefined && input.deadline < 0) {
       throw invalidParams('deadline must be a non-negative integer (epoch ms)', 'deadline');
     }
+    if (input.biddingDeadline !== undefined && input.biddingDeadline < 0) {
+      throw invalidParams(
+        'biddingDeadline must be a non-negative integer (epoch ms)',
+        'biddingDeadline',
+      );
+    }
 
     const createdAt = this.#clock();
     const taskId = this.#requireUniqueId(workspaceId);
@@ -651,11 +675,17 @@ export class TasksService {
     const requiredSkills = [...(input.requiredSkills ?? [])];
     const budget = input.budget ?? 0;
     const deadline = input.deadline ?? null;
+    const biddingDeadline = input.biddingDeadline ?? null;
     if (deadline !== null && deadline <= createdAt) {
       // A task that is expired on arrival is immediately reclaimable but
       // still shows as `open` until a sweep; reject it at the source.
       throw invalidParams('deadline must be in the future', 'deadline');
     }
+    if (biddingDeadline !== null && biddingDeadline <= createdAt) {
+      throw invalidParams('biddingDeadline must be in the future', 'biddingDeadline');
+    }
+    const status: TaskStatus = biddingDeadline === null ? 'open' : 'bidding';
+    const meta = biddingDeadline === null ? null : { biddingDeadline };
 
     const { row, event } = withTransaction(this.#db, () => {
       const created = this.#tasks.create({
@@ -664,9 +694,10 @@ export class TasksService {
         description,
         requiredSkills,
         budget,
-        status: 'open',
+        status,
         version: 1,
         deadline,
+        meta,
         createdAt,
         updatedAt: createdAt,
         workspaceId,
@@ -681,9 +712,10 @@ export class TasksService {
           description,
           requiredSkills,
           budget,
-          status: 'open',
+          status,
           publishedBy: actor.agentId,
           deadline,
+          ...(biddingDeadline === null ? {} : { biddingDeadline }),
           createdAt,
         },
         ts: createdAt,
@@ -731,10 +763,12 @@ export class TasksService {
   /**
    * Place (or overwrite) this agent's live bid for a task.
    *
-   * The first bid also opens the bidding window (`open → bidding`) and bumps
-   * the task aggregate version, so every appended event has a unique
-   * `(aggregate, version)` under the v5 index. Repeated bids overwrite the
-   * same OR-Set element (same bid id) rather than adding a second live row.
+   * Bidding must already be open: `task.publish` creates the task in `bidding`
+   * when a `biddingDeadline` is supplied, and `open` (no window) is not
+   * bid-able. Bids deliberately **do not touch `tasks.version`**; they append
+   * `task.bid.placed` (audit) and `task.bid.received` (live notification) at
+   * the current version. v6's partial unique index allows several bid events
+   * per version while keeping status events unique.
    */
   placeBid(
     input: PlaceBidInput,
@@ -743,9 +777,7 @@ export class TasksService {
   ): PlaceBidResult {
     const task = this.#tasks.get(input.taskId, workspaceId);
     if (task === undefined) throw notFoundTask(input.taskId);
-    if (task.status !== 'open' && task.status !== 'bidding') {
-      throw biddingClosed(task.id, task.status);
-    }
+    this.#assertBiddingOpen(task, this.#clock());
 
     const decision = this.#bidBuckets.get(actor.agentId).tryConsume();
     if (!decision.allowed) throw tooManyBids(decision.retryAfterMs);
@@ -756,31 +788,8 @@ export class TasksService {
     const persisted = withTransaction(this.#db, () => {
       const current = this.#tasks.get(input.taskId, workspaceId);
       if (current === undefined) throw notFoundTask(input.taskId);
-      if (current.status !== 'open' && current.status !== 'bidding') {
-        throw biddingClosed(current.id, current.status);
-      }
+      this.#assertBiddingOpen(current, at);
 
-      const nextStatus: TaskStatus =
-        current.status === 'open' ? 'bidding' : current.status;
-      const expectedVersion = current.version;
-      const changes = this.#tasks.updateWithVersion(
-        current.id,
-        expectedVersion,
-        { status: nextStatus },
-        { workspaceId, updatedAt: at },
-      );
-      if (changes === 0) {
-        const now = this.#tasks.get(current.id, workspaceId);
-        throw versionConflict(
-          current.id,
-          expectedVersion,
-          now?.version ?? null,
-          current.status,
-          nextStatus,
-        );
-      }
-
-      const version = expectedVersion + 1;
       const bid = this.#taskBids.upsertByAgent({
         id: proposedBidId,
         taskId: current.id,
@@ -792,25 +801,42 @@ export class TasksService {
         createdAt: at,
         workspaceId,
       });
-      const event = this.#events.append({
-        aggregateId: aggregateIdOf('task', current.id),
+      const payload = {
+        taskId: current.id,
+        bidId: bid.id,
+        agentId: bid.agentId,
+        price: bid.price,
+        eta: bid.eta,
+        approach: bid.approach,
+        confidence: bid.confidence,
+        createdAt: bid.createdAt,
+      };
+      const aggregateId = aggregateIdOf('task', current.id);
+      // Audit event (domain-only) and notification twin (live push) share the
+      // task's current version; neither changes `tasks.version`.
+      const placed = this.#events.append({
+        aggregateId,
         type: 'task.bid.placed',
-        version,
-        payload: {
-          taskId: current.id,
-          bidId: bid.id,
-          agentId: bid.agentId,
-          price: bid.price,
-          eta: bid.eta,
-          approach: bid.approach,
-          confidence: bid.confidence,
-          createdAt: bid.createdAt,
-        },
+        version: current.version,
+        payload,
+        ts: at,
+        workspaceId,
+      });
+      this.#events.append({
+        aggregateId,
+        type: 'task.bid.received',
+        version: current.version,
+        payload,
         ts: at,
         workspaceId,
       });
 
-      return { bid, event, status: nextStatus, version };
+      return {
+        bid,
+        event: placed,
+        status: current.status,
+        version: current.version,
+      };
     });
 
     return {
@@ -819,6 +845,19 @@ export class TasksService {
       version: persisted.version,
       seq: persisted.event.seq,
     };
+  }
+
+  /**
+   * Bidding is closed when the status is no longer `bidding` or the published
+   * `biddingDeadline` has passed. The row is never mutated by a bid, so this
+   * guard only reads.
+   */
+  #assertBiddingOpen(task: Task, now: number): void {
+    if (task.status !== 'bidding') throw biddingClosed(task.id, task.status);
+    const deadline = readBiddingDeadline(task.meta);
+    if (deadline !== null && now >= deadline) {
+      throw biddingClosed(task.id, task.status);
+    }
   }
 
   /** Live bid set for one task (admin-facing). */
@@ -1066,6 +1105,47 @@ export class TasksService {
   // ----------------------------------------------------------------- reclaim
 
   /**
+   * Close expired bidding windows: a `bidding` task whose `biddingDeadline`
+   * has passed and that has **no live bids** is cancelled. Tasks with bids stay
+   * in `bidding` for an explicit `task.award` (the window only stops new bids).
+   *
+   * Pure w.r.t. the injected clock, best-effort like `reclaimExpired`.
+   */
+  closeExpiredBidding(
+    now: number = this.#clock(),
+    workspaceId: string = this.#workspaceId,
+  ): CloseBiddingResult {
+    const candidates = this.#tasks.list({ workspaceId, status: 'bidding' });
+    const closed: TaskView[] = [];
+
+    for (const task of candidates) {
+      const deadline = readBiddingDeadline(task.meta);
+      if (deadline === null || deadline > now) continue;
+      if (this.#taskBids.count(task.id, { workspaceId }) > 0) continue;
+      try {
+        closed.push(
+          this.transition(task.id, 'cancelled', {
+            expectedVersion: task.version,
+            reason: 'bidding_window_closed',
+            workspaceId,
+          }),
+        );
+      } catch (err) {
+        if (
+          err instanceof ProtocolError &&
+          (err.code === JsonRpcErrorCode.VersionConflict ||
+            err.code === JsonRpcErrorCode.InvalidState)
+        ) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { closed, count: closed.length };
+  }
+
+  /**
    * Cancel `open` tasks whose `deadline` (or, when configured, whose
    * `createdAt + TASK_OPEN_TTL_SECONDS`) is at or before `now`.
    *
@@ -1150,6 +1230,7 @@ export function registerTasksModule(
       const requiredSkills = readOptionalSkills(input);
       const budget = readOptionalNonNegativeNumber(input, 'budget');
       const deadline = readOptionalTimestamp(input, 'deadline');
+      const biddingDeadline = readOptionalTimestamp(input, 'biddingDeadline');
       const result = service.publish(
         {
           title,
@@ -1157,6 +1238,7 @@ export function registerTasksModule(
           ...(requiredSkills === undefined ? {} : { requiredSkills }),
           ...(budget === undefined ? {} : { budget }),
           ...(deadline === undefined ? {} : { deadline }),
+          ...(biddingDeadline === undefined ? {} : { biddingDeadline }),
         },
         auth,
         ctx.workspaceId,

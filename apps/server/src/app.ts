@@ -318,6 +318,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         if (reclaimed.length > 0) {
           app.log.info({ count: reclaimed.length, msg: 'task.reclaimed' });
         }
+        const { closed } = tasks.closeExpiredBidding();
+        if (closed.length > 0) {
+          app.log.info({ count: closed.length, msg: 'task.bidding.closed' });
+        }
       } catch (err) {
         app.log.error({ err: serializeError(err), msg: 'task.reclaim.failed' });
       }

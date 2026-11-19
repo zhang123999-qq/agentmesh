@@ -12,6 +12,7 @@ import {
   type AwardResult,
   type BidListResult,
   type PlaceBidResult,
+  type TasksService,
   type TaskView,
 } from '../src/modules/tasks.js';
 import {
@@ -30,6 +31,7 @@ interface Harness {
   repos: Repositories;
   events: EventStore;
   tokens: TokenService;
+  service: TasksService;
   clock: { now: number };
   call: (method: string, params?: unknown, ctx?: DispatchContext) => Promise<DispatchOutcome>;
   register: (
@@ -72,7 +74,7 @@ function makeHarness(options: {
     clock: () => clock.now,
   });
 
-  registerTasksModule(registry, {
+  const service = registerTasksModule(registry, {
     db,
     tasks: repos.tasks,
     taskBids: repos.taskBids,
@@ -119,7 +121,12 @@ function makeHarness(options: {
   const publish: Harness['publish'] = (token, params = {}) =>
     call(
       METHODS.task.publish,
-      { title: 'task', requiredSkills: ['typescript'], ...params },
+      {
+        title: 'task',
+        requiredSkills: ['typescript'],
+        biddingDeadline: CLOCK + 1_000_000,
+        ...params,
+      },
       { token },
     );
   const bid: Harness['bid'] = (token, params) =>
@@ -140,6 +147,7 @@ function makeHarness(options: {
     repos,
     events,
     tokens,
+    service,
     clock,
     call,
     register,
@@ -194,13 +202,15 @@ function seedFinishedTasks(
 }
 
 describe('task.bid', () => {
-  it('opens bidding on the first bid, persists the OR-Set row and appends one event', async () => {
+  it('publishes into bidding and appends audit + notification bid events without bumping version', async () => {
     const h = makeHarness();
     const admin = await h.register('admin', 'admin');
     const worker = await h.register('worker', 'agent', ['typescript']);
     const task = resultOf<{ task: TaskView }>(
       await h.publish(admin.token),
     ).task;
+    expect(task.status).toBe('bidding');
+    expect(task.version).toBe(1);
 
     const placed = resultOf<PlaceBidResult>(
       await h.bid(worker.token, {
@@ -214,10 +224,10 @@ describe('task.bid', () => {
 
     expect(placed).toMatchObject({
       status: 'bidding',
-      version: 2,
+      version: 1,
       bid: { taskId: task.id, agentId: worker.agentId, price: 100, eta: 60 },
     });
-    expect(h.repos.tasks.get(task.id)).toMatchObject({ status: 'bidding', version: 2 });
+    expect(h.repos.tasks.get(task.id)).toMatchObject({ status: 'bidding', version: 1 });
 
     const list = resultOf<BidListResult>(
       await h.call(METHODS.task.bids, { taskId: task.id }, { token: admin.token }),
@@ -230,10 +240,13 @@ describe('task.bid', () => {
       approach: 'plan',
       confidence: 0.8,
     });
-    expect(h.taskLog(task.id).map((event) => event.type)).toEqual([
+    const log = h.taskLog(task.id);
+    expect(log.map((event) => event.type)).toEqual([
       'task.published',
       'task.bid.placed',
+      'task.bid.received',
     ]);
+    expect(log.every((event) => event.version === 1)).toBe(true);
   });
 
   it('overwrites the same agent bid instead of creating a second live row', async () => {
@@ -253,6 +266,59 @@ describe('task.bid', () => {
     expect(second.bid.price).toBe(80);
     expect(h.repos.taskBids.listByTask(task.id)).toHaveLength(1);
     expect(h.taskLog(task.id).filter((event) => event.type === 'task.bid.placed')).toHaveLength(2);
+    // Bidding never mutates the task row version.
+    expect(h.repos.tasks.get(task.id)?.version).toBe(1);
+  });
+
+  it('does not change tasks.version across ten bids', async () => {
+    const h = makeHarness({ bidRateLimit: { ratePerSecond: 100, burst: 100 } });
+    const admin = await h.register('admin', 'admin');
+    const worker = await h.register('worker', 'agent', ['typescript']);
+    const task = resultOf<{ task: TaskView }>(await h.publish(admin.token)).task;
+
+    for (let i = 0; i < 10; i += 1) {
+      resultOf<PlaceBidResult>(
+        await h.bid(worker.token, { taskId: task.id, price: 100 + i }),
+      );
+    }
+
+    expect(h.repos.tasks.get(task.id)?.version).toBe(1);
+    expect(h.repos.taskBids.listByTask(task.id)).toHaveLength(1);
+    expect(await h.taskVersion(task.id, admin.token)).toBe(1);
+  });
+
+  it('rejects bids on an open task that has no bidding window', async () => {
+    const h = makeHarness();
+    const admin = await h.register('admin', 'admin');
+    const worker = await h.register('worker', 'agent', ['typescript']);
+    const published = resultOf<{ task: TaskView }>(
+      await h.call(
+        METHODS.task.publish,
+        { title: 'open draft' },
+        { token: admin.token },
+      ),
+    ).task;
+    expect(published.status).toBe('open');
+
+    const error = errorOf(
+      await h.bid(worker.token, { taskId: published.id, price: 100 }),
+    );
+    expect(error.code).toBe(JsonRpcErrorCode.InvalidState);
+    expect(error.data).toMatchObject({ reason: 'bidding_closed' });
+  });
+
+  it('rejects bids after biddingDeadline has passed', async () => {
+    const h = makeHarness();
+    const admin = await h.register('admin', 'admin');
+    const worker = await h.register('worker', 'agent', ['typescript']);
+    const task = resultOf<{ task: TaskView }>(
+      await h.publish(admin.token, { biddingDeadline: CLOCK + 1_000 }),
+    ).task;
+
+    h.clock.now = CLOCK + 2_000;
+    const error = errorOf(await h.bid(worker.token, { taskId: task.id, price: 100 }));
+    expect(error.code).toBe(JsonRpcErrorCode.InvalidState);
+    expect(error.data).toMatchObject({ reason: 'bidding_closed' });
   });
 
   it('rejects bids after the window closes with -32003', async () => {
@@ -316,6 +382,41 @@ describe('task.bid', () => {
       await h.call(METHODS.task.bids, { taskId: task.id }, { token: worker.token }),
     );
     expect(forbidden.code).toBe(JsonRpcErrorCode.Forbidden);
+  });
+});
+
+describe('bidding window close', () => {
+  it('cancels a bidding task with no bids after biddingDeadline', async () => {
+    const h = makeHarness();
+    const admin = await h.register('admin', 'admin');
+    const task = resultOf<{ task: TaskView }>(
+      await h.publish(admin.token, { biddingDeadline: CLOCK + 1_000 }),
+    ).task;
+
+    h.clock.now = CLOCK + 2_000;
+    const result = h.service.closeExpiredBidding();
+    expect(result.count).toBe(1);
+    expect(result.closed[0]).toMatchObject({ id: task.id, status: 'cancelled' });
+    expect(h.repos.tasks.get(task.id)?.status).toBe('cancelled');
+    expect(h.taskLog(task.id).at(-1)?.payload).toMatchObject({
+      from: 'bidding',
+      to: 'cancelled',
+      reason: 'bidding_window_closed',
+    });
+  });
+
+  it('keeps a bidding task open when it already has a live bid', async () => {
+    const h = makeHarness();
+    const admin = await h.register('admin', 'admin');
+    const worker = await h.register('worker', 'agent', ['typescript']);
+    const task = resultOf<{ task: TaskView }>(
+      await h.publish(admin.token, { biddingDeadline: CLOCK + 1_000 }),
+    ).task;
+    await h.bid(worker.token, { taskId: task.id, price: 100 });
+
+    h.clock.now = CLOCK + 2_000;
+    expect(h.service.closeExpiredBidding().count).toBe(0);
+    expect(h.repos.tasks.get(task.id)?.status).toBe('bidding');
   });
 });
 
@@ -459,7 +560,13 @@ describe('task.award', () => {
   it('rejects awarding a task that has not started bidding', async () => {
     const h = makeHarness();
     const admin = await h.register('admin', 'admin');
-    const task = resultOf<{ task: TaskView }>(await h.publish(admin.token)).task;
+    const task = resultOf<{ task: TaskView }>(
+      await h.call(
+        METHODS.task.publish,
+        { title: 'draft without window' },
+        { token: admin.token },
+      ),
+    ).task;
 
     const error = errorOf(
       await h.award(admin.token, {

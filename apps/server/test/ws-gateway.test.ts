@@ -973,3 +973,53 @@ describe('ws frame size limit', () => {
     expect(closed.code).toBe(1009);
   });
 });
+
+describe('ws live bid notification', () => {
+  it('pushes task.bid.received to an online admin', async () => {
+    const harness = await startHarness({
+      config: { allowAdminSelfRegister: true },
+      ws: { livePush: true },
+    });
+    const adminClient = await TestClient.open(harness.url);
+    const registered = await adminClient.request(
+      METHODS.agent.register,
+      { name: 'admin', role: 'admin' },
+      'admin-reg',
+    );
+    expect((registered.result as { agentId?: string }).agentId).toBeTruthy();
+    await adminClient.waitFor((frame) => frame.type === 'welcome');
+
+    const worker = await registerAgent(harness, 'worker');
+    const published = await adminClient.request(
+      METHODS.task.publish,
+      { title: 'live bid', biddingDeadline: Date.now() + 60_000 },
+      'publish',
+    );
+    const taskId = (published.result as { task?: { id?: string } }).task?.id;
+    expect(taskId).toBeTruthy();
+
+    const bidResponse = await worker.client.request(
+      METHODS.task.bid,
+      { taskId: taskId as string, price: 10 },
+      'bid',
+    );
+    expect(bidResponse.error).toBeUndefined();
+
+    const notification = await adminClient.waitFor(
+      (frame) =>
+        frame.method === 'task.bid.received' &&
+        (
+          (frame.params as Record<string, unknown> | undefined)?.payload as
+            | Record<string, unknown>
+            | undefined
+        )?.taskId === taskId,
+      { label: 'task.bid.received live push' },
+    );
+    expect(notification.params).toMatchObject({
+      payload: { taskId, agentId: worker.agentId, price: 10 },
+    });
+
+    await worker.client.close();
+    await adminClient.close();
+  });
+});

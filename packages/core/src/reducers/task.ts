@@ -161,10 +161,6 @@ export const taskReducer: Reducer<TaskState> = (state, event: CoreEvent) => {
       }
       return {
         ...next,
-        // The first bid opens the bidding window (open → bidding). Later bids
-        // leave the status untouched; a late bid after award cannot reopen it.
-        status:
-          next.status === null || next.status === 'open' ? 'bidding' : next.status,
         bids: {
           ...next.bids,
           [bidId]: {

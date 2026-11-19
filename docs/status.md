@@ -9,8 +9,8 @@
 | US-009 | **完成（本地验证）** | 竞标、五维评分、冷启动探索、CAS 授标、并发冲突 |
 | US-010…US-021 | 未开始 | `message.history`、进度/完成/失败、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**379**
-（core 41 / protocol 44 / store 69 / server 225）。
+测试基线：**385**
+（core 41 / protocol 44 / store 69 / server 231）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -22,8 +22,12 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
 
 US-009 的关键语义：
 
-- 第一次 `task.bid` 把任务从 `open` 推到 `bidding`；每次竞标都递增 task 聚合
-  version（保证 v5 `(aggregate, version)` 唯一），竞标窗口在 `awarded` 后关闭。
+- `task.publish` 带 `biddingDeadline` → 直接创建为 `bidding`；不带 → `open`（草稿，
+  不可竞标）。
+- 竞标不修改 `tasks.version`；整个窗口内 award 的 `expectedVersion` 稳定等于
+  publish/进入 bidding 时的版本。
+- 每次 bid 追加 `task.bid.placed`（审计）与 `task.bid.received`（实时通知）两条
+  事件，版本都等于当前 task version；v6 部分唯一索引允许同版本多条 bid 事件。
 - 同一 agent 重复竞标按覆盖语义（复用同一 bid 行/id）。
 - 五维权重默认 0.35/0.25/0.10/0.15/0.15，可配置且必须和为 1；历史成功率按
   `history_confidence_threshold=5` 向 0.5 收缩；availability = 1/(1+activeTasks)。
@@ -31,6 +35,8 @@ US-009 的关键语义：
 - `task.award` 必填 `expectedVersion`；并发时第二个请求 `-32007`，事件日志仅一条
   `task.awarded`；`task.awarded` 走 `withTransaction` 帧栈，提交后才 emit。
 - `task.bid` 限流 5/min/agent，复用 LRU `TokenBucketRegistry`。
+- `biddingDeadline` 到期且无 live bid → `closeExpiredBidding` 将任务 `cancelled`；
+  已有 bid 则保持 `bidding` 等待 award。
 
 ## 已实现的 RPC（14 / 21）
 
@@ -76,9 +82,9 @@ US-009 的关键语义：
 溯源只能用文件内容 hash 对比。当前关键文件：
 
 - `apps/server/src/modules/tasks.ts` SHA-256
-  `3c9c7e92e1bb9340757eea008bd5faae8dac8e3495f74e6ed2e5d17106fb0568`
+  `29ea99b43b0af9a57846a3fb7d2e96b49d1bfc61ddf208a96a19faa22a462b21`
 - `apps/server/test/tasks.test.ts` SHA-256
-  `30eda8451444c789cba6d5794c73a2634f35f2f16880e4351094d9f78d83d9a4`
+  `7b823e460e8f975a885a1b22215a905630063105335be133c42119e9095c6adf`
 
-（hash 为 US-009 实现后的基线。）
+（hash 为 US-009 收尾修复后的基线。）
 

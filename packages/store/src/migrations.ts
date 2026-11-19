@@ -231,6 +231,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version
   ON events(workspace_id, aggregate_id, version);
 `;
 
+/**
+ * v6 — allow multiple bid events at one aggregate version.
+ *
+ * The bidding design keeps `tasks.version` stable across bids, so a task can
+ * have several `task.bid.placed` / `task.bid.received` events at the same
+ * `(aggregate_id, version)`. v5's unconditional unique index is replaced by a
+ * **partial** unique index that still guards every status/domain event while
+ * excluding bid events. This preserves the duplicate-version backstop where it
+ * matters (one status transition per version) without making the bid log
+ * unrepresentable.
+ */
+const BID_EVENT_INDEX_SQL = `
+DROP INDEX IF EXISTS uq_events_aggregate_version;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version_status
+  ON events(workspace_id, aggregate_id, version)
+  WHERE type NOT IN ('task.bid.placed', 'task.bid.received');
+`;
+
 const ACCOUNT_CREDENTIALS_SQL = 'ALTER TABLE accounts ADD COLUMN secret_hash TEXT';
 
 export const MIGRATIONS: readonly Migration[] = [
@@ -269,6 +287,13 @@ export const MIGRATIONS: readonly Migration[] = [
     name: 'event_log_integrity',
     up: (db) => {
       db.exec(EVENT_INTEGRITY_SQL);
+    },
+  },
+  {
+    version: 6,
+    name: 'bid_events_per_version',
+    up: (db) => {
+      db.exec(BID_EVENT_INDEX_SQL);
     },
   },
 ];

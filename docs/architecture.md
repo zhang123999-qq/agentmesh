@@ -45,8 +45,8 @@ docs                本目录
 - **聚合 ID**：`account:<id>` / `channel:<id>` / `message:<id>` / `task:<id>`。
 - **写入**：`EventStore.append` 在同一 `IMMEDIATE` 事务内计算 per-aggregate `version`
   与 `prevHash`；`withTransaction` 维护事务帧栈，**只在最外层提交后**触发
-  `onAppend`，回滚不推送。竞标事件也占据 task 聚合的版本序列，因此 bid 会递增
-  task version。
+  `onAppend`，回滚不推送。竞标事件复用当前 task version（不递增），由 v6 部分唯一
+  索引放行。
 - **读取**：`loadAggregate` / `readFrom` / `readAfter` / `head`。
 - **重放**：`replayAggregate`，或 `snapshot + seq > snapshot.seq` 增量重放。
 - **快照**：`snapshots(aggregate_id, version)`，派生物，可随时删除重建。
@@ -80,9 +80,11 @@ docs                本目录
 - 业务模块：账号（US-005）、频道/消息（US-007）、任务与竞标/授标（US-008/009）。
 - 已注册 14 / 21 个协议方法；进度、完成/失败、审核、改派、消息历史仍缺失
   （见 [status.md](status.md)）。
-- **竞标事件与版本**：第一次 bid 把 `open → bidding`；每次 bid 都递增 task 聚合
-  version（v5 唯一索引要求一个 `(aggregate, version)` 只对应一个事件）。
-  `task.awarded` 是状态迁移事件，在 `withTransaction` 内 append，提交后 emit。
+- **竞标事件与版本**：`task.publish` 带 `biddingDeadline` 时直接进入 `bidding`；
+  bid **不递增** task version，而是以当前 version 追加 `task.bid.placed`（审计）
+  与 `task.bid.received`（实时通知）——v6 部分唯一索引允许同版本多条 bid 事件，
+  同时保持状态事件每版本唯一。`task.awarded` 是状态迁移事件，在
+  `withTransaction` 内 append，提交后 emit。
 
 ## 测试金字塔
 
