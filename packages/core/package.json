@@ -1,0 +1,34 @@
+{
+  "name": "@agentmesh/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentMesh event-sourcing core — append-only event store, aggregate reducers, replay and snapshots",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@agentmesh/protocol": "*",
+    "@agentmesh/store": "*"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  }
+}
