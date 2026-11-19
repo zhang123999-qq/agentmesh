@@ -911,6 +911,18 @@ describe('anonymous registration throttling', () => {
     expect(limiter.size).toBeLessThanOrEqual(3);
   });
 
+  it('keeps an active address while one-shot addresses flood in (LRU)', () => {
+    const limiter = new RegistrationLimiter({ maxEntries: 2, clock: () => 1_000 });
+    limiter.check('active');
+
+    for (let i = 0; i < 10; i += 1) {
+      limiter.check('active');
+      limiter.check(`10.1.0.${i}`);
+    }
+
+    expect(limiter.has('active')).toBe(true);
+  });
+
   it('limits attempts per remote address and leaves other addresses alone', async () => {
     const h = makeHarness({ registerRateLimit: { max: 2, windowMs: 60_000 } });
 

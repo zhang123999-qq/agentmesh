@@ -9,8 +9,8 @@
 | US-009 | 未开始 | 竞标引擎 + 授标 CAS；11 条 AC 待实现 |
 | US-010…US-021 | 未开始 | `message.history`、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**348**
-（core 40 / protocol 44 / store 69 / server 195）。
+测试基线：**356**
+（core 40 / protocol 44 / store 69 / server 203）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -55,6 +55,8 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
    - 硬约束：`task.awarded` 必须走 `withTransaction` 帧栈后 emit；
    - 并发测试必须断言第二个 award 收到 `-32007` 且事件日志仅一条 `task.awarded`；
    - `config.demoMode=true` 时强制 `AlwaysExploreForDemo`。
+   - **US-011 派生约束**：产物 >1 MiB 时走 HTTP 上传 + WS 只传引用（URL/ID），
+     不得调大 WS `maxPayload`。
 2. US-010：`message.history`，补消息回放路径。
 3. US-011/013：`task.fail`、`task.cancel`、审核决策与改派。
 4. US-014：SDK（Web 必须复用它，不得自建第二套续传）。

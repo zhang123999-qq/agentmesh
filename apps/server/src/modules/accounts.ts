@@ -237,18 +237,25 @@ export class RegistrationLimiter {
     return this.#hits.size;
   }
 
+  has(key: string): boolean {
+    return this.#hits.has(key);
+  }
+
   check(key: string): { allowed: true } | { allowed: false; retryAfterMs: number } {
     const now = this.#clock();
     const bucket = this.#hits.get(key);
-    if (bucket === undefined || now >= bucket.resetAt) {
-      this.#makeRoom(now);
-      this.#hits.set(key, { count: 1, resetAt: now + this.#windowMs });
+    if (bucket !== undefined && now < bucket.resetAt) {
+      // LRU touch: keep active addresses while one-shot keys are evicted.
+      this.#hits.delete(key);
+      this.#hits.set(key, bucket);
+      if (bucket.count >= this.#max) {
+        return { allowed: false, retryAfterMs: bucket.resetAt - now };
+      }
+      bucket.count += 1;
       return { allowed: true };
     }
-    if (bucket.count >= this.#max) {
-      return { allowed: false, retryAfterMs: bucket.resetAt - now };
-    }
-    bucket.count += 1;
+    this.#makeRoom(now);
+    this.#hits.set(key, { count: 1, resetAt: now + this.#windowMs });
     return { allowed: true };
   }
 

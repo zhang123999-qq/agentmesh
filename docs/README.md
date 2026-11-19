@@ -19,7 +19,7 @@
 - [packages/core/README.md](../packages/core/README.md)
 - [apps/server/README.md](../apps/server/README.md)
 
-当前基线：**348 个测试全绿**（core 40 / protocol 44 / store 69 / server 195），
+当前基线：**356 个测试全绿**（core 40 / protocol 44 / store 69 / server 203），
 `npm audit --audit-level=high` 为 **0 vulnerabilities**。
 
 > 权威 `prd.json` 与提交链位于 qwenpaw 容器工作区；本地副本此前没有 git，

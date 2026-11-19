@@ -21,8 +21,8 @@ plugin registry and pino structured logging.
 | `AUTH_FAIL_WINDOW_SECONDS` | `60` | Length of the failure-counting window (1…86400). |
 | `AUTH_LOCKOUT_SECONDS` | `60` | Base lockout after too many failures; doubles on each repeat (1…86400). |
 | `WS_PATH` | `/ws` | WebSocket upgrade path (must start with `/`). |
-| `ALLOWED_ORIGINS` | *(empty)* | Comma-separated exact origins allowed to open a browser WebSocket (CSWSH defence); wildcards rejected. Empty means development localhost only / production no browser origin. |
-| `ALLOW_MISSING_ORIGIN` | `true` | Allow upgrades with no `Origin` header (SDK/CLI). Set `false` to require an allow-listed Origin. |
+| `ALLOWED_ORIGINS` | *(empty)* | Comma-separated exact origins allowed to open a browser WebSocket (CSWSH defence); wildcards rejected. **Required when `NODE_ENV=production`** (startup fails if empty). Development defaults to localhost/127.0.0.1/[::1]. |
+| `ALLOW_MISSING_ORIGIN` | `true` | Allow upgrades with no `Origin` header (SDK/CLI/demo). Default true in both environments; set `false` only if every client is a browser. |
 | `WS_HEARTBEAT_INTERVAL_MS` | `30000` | Native WS ping interval; a socket that misses one round is terminated. |
 | `RESUME_MAX_EVENTS` | `1000` | Hard replay window for one `resume`; larger gaps get `gap_too_large`. |
 | `WS_CONNECTION_RATE_LIMIT` | `100` | Per-connection JSON-RPC requests/second (soft `-32005`). |
@@ -298,7 +298,20 @@ no password KDF and no SQLCipher in this build.
   `localhost`/`127.0.0.1`/`[::1]`.
 - **Input limits.** HTTP bodies and WS frames are capped at **1 MiB**
   (`bodyLimit` / `maxPayload`). The auth-failure, registration and per-agent
-  bucket maps are bounded and evict the oldest entry at the ceiling.
+  bucket maps are bounded and use **LRU** eviction, so an active identity's
+  rate-limit state is never displaced by a flood of one-shot keys.
+- **Artifact transport (architecture decision).** Do **not** raise
+  `maxPayload` for US-011 artifacts. Payloads above 1 MiB go through an HTTP
+  upload and WS carries only a reference (URL/ID). Raising the frame limit
+  would widen the DoS surface.
+- **Clock tolerance.** `clockTolerance: 5s` is for a single host or a
+  clock-synchronised fleet. Multi-instance deployments (US-022+) need NTP or a
+  tolerance of at most 30s.
+- **`ALLOW_MISSING_ORIGIN` defaults to true in both environments.** Origin is
+  a browser-added header; SDK/CLI/demo clients legitimately omit it. Origin
+  checks provide no CSWSH protection for non-browser clients, so rejecting
+  them is deployment friction with no security gain. Set it to false only when
+  every client is a browser.
 - **Logs.** pino redacts `authorization`, `secret`, `token`, `password` and
   `secretHash` (top-level and nested). Handlers must still never pass a
   credential to the logger.

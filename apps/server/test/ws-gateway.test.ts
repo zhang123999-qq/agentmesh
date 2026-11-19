@@ -929,6 +929,32 @@ describe('ws origin validation', () => {
     expect(client.readyState).toBe(WebSocket.OPEN);
     await client.close();
   });
+
+  it('allows SDK/CLI clients with no Origin by default in production', async () => {
+    const harness = await startHarness({
+      config: {
+        isProduction: true,
+        nodeEnv: 'production',
+        allowedOrigins: ['https://app.example'],
+        allowMissingOrigin: true,
+      },
+    });
+    const client = await TestClient.open(harness.url);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+    await client.close();
+  });
+
+  it('rejects no-Origin clients in production when ALLOW_MISSING_ORIGIN=false', async () => {
+    const harness = await startHarness({
+      config: {
+        isProduction: true,
+        nodeEnv: 'production',
+        allowedOrigins: ['https://app.example'],
+        allowMissingOrigin: false,
+      },
+    });
+    await expect(TestClient.open(harness.url)).rejects.toThrow();
+  });
 });
 
 describe('ws frame size limit', () => {

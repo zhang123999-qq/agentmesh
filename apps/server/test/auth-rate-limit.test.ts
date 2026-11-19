@@ -298,6 +298,18 @@ describe('AuthFailureLimiter', () => {
     expect(limiter.size).toBeLessThanOrEqual(3);
   });
 
+  it('keeps an actively-checked identity while one-shot keys flood in (LRU)', () => {
+    const limiter = new AuthFailureLimiter({ maxEntries: 3, clock: () => 1_000 });
+    limiter.recordFailure('victim');
+
+    for (let i = 0; i < 12; i += 1) {
+      limiter.check('victim'); // active identity, touched before each insert
+      limiter.recordFailure(`flood-${i}`);
+    }
+
+    expect(limiter.has('victim')).toBe(true);
+  });
+
   it('caps the backoff and clears a key on success', () => {    let now = T0;
     const limiter = new AuthFailureLimiter({
       clock: () => now,

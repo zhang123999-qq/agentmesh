@@ -2,6 +2,20 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-19 — 安全补充 A–F
+
+测试基线：**356**（core 40 / protocol 44 / store 69 / server 203）。
+
+- **A**：生产 `ALLOWED_ORIGINS` 为空 → 启动 `ConfigError` fail fast（不再 warn + 启动）。
+- **B**：`ALLOW_MISSING_ORIGIN` 默认 **true（两个环境）** 并写入 README/config 注释。
+- **C**：`TokenBucketRegistry`、`AuthFailureLimiter`、`RegistrationLimiter` 全部改为
+  **LRU** 淘汰；活跃 identity 不会被一次性 key 洪泛挤掉，补测试锁定。
+- **D**：错误路径日志脱敏测试：authenticate 失败、WS 握手失败、`err.body/request/payload`；
+  redact 路径补齐 `err.body` / `err.request` / `err.payload` / `*.body` / `*.payload`。
+- **E**：记录产物传输决策：WS `maxPayload` 保持 1 MiB，US-011 产物走 HTTP 上传 +
+  WS 引用（URL/ID）。
+- **F**：记录 `clockTolerance: 5s` 的单机/时钟同步前提与多实例 NTP/≤30s 建议。
+
 ## 2026-11-19 — 安全加固 + 文档整理
 
 测试基线：**348**（core 40 / protocol 44 / store 69 / server 195）。

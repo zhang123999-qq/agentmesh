@@ -110,6 +110,9 @@ export class AuthFailureLimiter {
     const now = this.#clock();
     const bucket = this.#buckets.get(key);
     if (bucket === undefined) return { allowed: true };
+    // LRU touch: active identities survive a flood of one-shot keys.
+    this.#buckets.delete(key);
+    this.#buckets.set(key, bucket);
     if (bucket.lockedUntil > now) {
       return { allowed: false, retryAfterMs: bucket.lockedUntil - now };
     }
@@ -132,12 +135,17 @@ export class AuthFailureLimiter {
   recordFailure(key: string): void {
     const now = this.#clock();
     this.#sweepIfNeeded(now);
-    const bucket = this.#buckets.get(key) ?? {
+    const existing = this.#buckets.get(key);
+    const bucket = existing ?? {
       failures: 0,
       windowStartedAt: now,
       lockedUntil: 0,
       lockouts: 0,
     };
+    if (existing !== undefined) {
+      // LRU touch on write as well as read.
+      this.#buckets.delete(key);
+    }
     this.#buckets.set(key, bucket);
 
     if (bucket.lockedUntil > now) return; // already locked; nothing to add
@@ -162,6 +170,11 @@ export class AuthFailureLimiter {
   /** Diagnostics/tests: number of tracked identities. */
   get size(): number {
     return this.#buckets.size;
+  }
+
+  /** Diagnostics/tests: is this identity's bucket still retained? */
+  has(key: string): boolean {
+    return this.#buckets.has(key);
   }
 
   /** `base * 2^lockouts`, capped at {@link MAX_LOCKOUT_MS}. */

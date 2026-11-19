@@ -37,10 +37,17 @@
 ## 传输与 WS
 
 - TLS 在反向代理终止；Node 只监听 HTTP/ws。
-- **Origin allow-list**：`ALLOWED_ORIGINS` 精确匹配，拒绝 `*`；生产为空时拒绝所有
-  浏览器 Origin 并启动 warn。`ALLOW_MISSING_ORIGIN`（默认 true）控制 SDK/CLI 这类
-  无 Origin 客户端；开发默认允许 localhost/127.0.0.1/[::1]。
+- **Origin allow-list**：`ALLOWED_ORIGINS` 精确匹配，拒绝 `*`；**生产为空时启动
+  fail fast（`ConfigError`）**，不能 warn + 启动。`ALLOW_MISSING_ORIGIN` 默认
+  **true（两个环境）**：Origin 是浏览器自动加的，SDK/CLI/demo 不带属正常，拒绝它们
+  没有 CSWSH 防护收益；带 Origin 的请求才校验。开发默认允许
+  localhost/127.0.0.1/[::1]。
 - **输入上限**：HTTP `bodyLimit` 与 WS `maxPayload` 均为 1 MiB。
+- **产物传输（架构决策）**：WS `maxPayload` 为 1 MiB，**不得为产物传输调大**（会
+  扩大 DoS 面）。US-011 的产物超过 1 MiB 时走 **HTTP 上传 + WS 只传引用
+  （URL/ID）**。US-011 实现必须遵守。
+- **clockTolerance 5s**：适用于单机/时钟同步环境。多实例部署（US-022+）需要 NTP
+  同步，或将 tolerance 调到 ≤30s；当前值不改。
 - **软限流**：连接级 / agent 级超限返回 `-32005`，socket 保持打开。
 
 ## 日志与数据

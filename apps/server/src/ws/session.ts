@@ -122,9 +122,19 @@ export class TokenBucketRegistry {
     return this.#buckets.size;
   }
 
+  has(agentId: string): boolean {
+    return this.#buckets.has(agentId);
+  }
+
   get(agentId: string): TokenBucket {
     const existing = this.#buckets.get(agentId);
-    if (existing !== undefined) return existing;
+    if (existing !== undefined) {
+      // LRU touch: re-insert at the tail so active agents are never evicted
+      // in favour of a flood of one-shot identities.
+      this.#buckets.delete(agentId);
+      this.#buckets.set(agentId, existing);
+      return existing;
+    }
 
     if (this.#buckets.size >= this.#maxEntries) {
       const oldest = this.#buckets.keys().next().value;

@@ -143,7 +143,12 @@ export interface ServerConfig {
    * allowed).
    */
   readonly allowedOrigins: readonly string[];
-  /** Allow upgrades with no Origin header (SDK/CLI; not browsers). */
+  /**
+   * Allow upgrades with no Origin header (SDK/CLI; not browsers). Default
+   * **true in every environment**: Origin is a browser-added header, so a
+   * missing one is normal for non-browser clients and Origin checks provide no
+   * CSWSH protection for them. Set false only if every client is a browser.
+   */
   readonly allowMissingOrigin: boolean;
   /** Server-initiated WS ping interval; unresponsive sockets are terminated. */
   readonly wsHeartbeatIntervalMs: number;
@@ -409,6 +414,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const nodeEnv = readString(env, 'NODE_ENV', 'development');
   const isProduction = nodeEnv === 'production';
 
+  const allowedOrigins = parseAllowedOrigins(env.ALLOWED_ORIGINS);
+  if (isProduction && allowedOrigins.length === 0) {
+    throw new ConfigError(
+      'ALLOWED_ORIGINS must be set when NODE_ENV=production; without it the web admin cannot open a WebSocket',
+      'ALLOWED_ORIGINS',
+    );
+  }
+
   const config: ServerConfig = {
     port: parsePort(env.PORT),
     host: readString(env, 'HOST', DEFAULT_HOST),
@@ -440,7 +453,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       MAX_AUTH_WINDOW_SECONDS,
     ),
     wsPath: parseWsPath(env.WS_PATH),
-    allowedOrigins: parseAllowedOrigins(env.ALLOWED_ORIGINS),
+    allowedOrigins,
     allowMissingOrigin: parseBoolean(
       env.ALLOW_MISSING_ORIGIN,
       'ALLOW_MISSING_ORIGIN',
@@ -518,6 +531,8 @@ export function describeSecurityWarnings(config: ServerConfig): string[] {
     );
   }
   if (config.isProduction && config.allowedOrigins.length === 0) {
+    // Unreachable through loadConfig (it fails fast), kept for callers that
+    // construct ServerConfig directly in tests/embedding.
     warnings.push(
       'ALLOWED_ORIGINS is empty in production; every browser WebSocket Origin will be rejected',
     );

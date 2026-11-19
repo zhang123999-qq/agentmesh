@@ -36,6 +36,7 @@ describe('loadConfig', () => {
       HOST: '127.0.0.1',
       DB_PATH: '/data/agentmesh.db',
       JWT_SECRET: '0123456789abcdef0123456789abcdef',
+      ALLOWED_ORIGINS: 'https://app.example.com',
       LOG_LEVEL: 'debug',
       SERVER_VERSION: '9.9.9',
     });
@@ -47,6 +48,7 @@ describe('loadConfig', () => {
       logLevel: 'debug',
       version: '9.9.9',
       isProduction: true,
+      allowMissingOrigin: true,
     });
   });
 
@@ -66,7 +68,12 @@ describe('loadConfig', () => {
   });
 
   it('requires JWT_SECRET in production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/JWT_SECRET is required/);
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        ALLOWED_ORIGINS: 'https://app.example.com',
+      }),
+    ).toThrow(/JWT_SECRET is required/);
   });
 
   it('rejects a too-short JWT_SECRET', () => {
@@ -80,12 +87,29 @@ describe('loadConfig', () => {
       loadConfig({
         NODE_ENV: 'production',
         JWT_SECRET: 'sixteen-chars-ok?',
+        ALLOWED_ORIGINS: 'https://app.example.com',
       }),
     ).toThrow(/32 bytes/);
     expect(() =>
       loadConfig({
         NODE_ENV: 'production',
         JWT_SECRET: '0123456789abcdef0123456789abcdef',
+        ALLOWED_ORIGINS: 'https://app.example.com',
+      }),
+    ).not.toThrow();
+  });
+
+  it('fails fast in production when ALLOWED_ORIGINS is empty', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        JWT_SECRET: '0123456789abcdef0123456789abcdef',
+      }),
+    ).toThrow(/ALLOWED_ORIGINS/);
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'development',
+        JWT_SECRET: 'test-secret-value-1234567890',
       }),
     ).not.toThrow();
   });
@@ -111,10 +135,11 @@ describe('loadConfig', () => {
     const prod = loadConfig({
       NODE_ENV: 'production',
       JWT_SECRET: '0123456789abcdef0123456789abcdef',
+      ALLOWED_ORIGINS: 'https://app.example.com',
       ALLOW_ADMIN_SELF_REGISTER: 'true',
     });
     const warnings = describeSecurityWarnings(prod).join('\n');
-    expect(warnings).toContain('ALLOWED_ORIGINS is empty');
+    expect(warnings).not.toContain('ALLOWED_ORIGINS is empty');
     expect(warnings).toContain('ALLOW_ADMIN_SELF_REGISTER');
   });
 
