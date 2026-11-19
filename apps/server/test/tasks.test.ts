@@ -76,6 +76,8 @@ function makeHarness(options: { openTtlSeconds?: number } = {}): Harness {
   const service = registerTasksModule(registry, {
     db,
     tasks: repos.tasks,
+    taskBids: repos.taskBids,
+    accounts: repos.accounts,
     events,
     openTtlSeconds: options.openTtlSeconds ?? 0,
     idFactory: () => {
@@ -700,6 +702,8 @@ describe('open-task timeout reclaim', () => {
     const publisher = new TasksService({
       db,
       tasks: repos.tasks,
+      taskBids: repos.taskBids,
+      accounts: repos.accounts,
       events,
       workspaceId: 'default',
       clock: () => Date.now() - 60_000,

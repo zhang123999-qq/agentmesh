@@ -56,7 +56,11 @@ export class TokenBucket {
   #lastRefill: number;
 
   constructor(options: TokenBucketOptions) {
-    this.#ratePerSecond = Math.max(1, options.ratePerSecond);
+    // Fractional rates are meaningful (e.g. 5 bids/minute = 5/60 per second).
+    this.#ratePerSecond =
+      Number.isFinite(options.ratePerSecond) && options.ratePerSecond > 0
+        ? options.ratePerSecond
+        : 1;
     this.#burst = Math.max(1, options.burst);
     this.#clock = options.clock ?? (() => Date.now());
     this.#tokens = this.#burst;

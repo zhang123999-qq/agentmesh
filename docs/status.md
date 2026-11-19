@@ -6,11 +6,11 @@
 | --- | --- | --- |
 | US-001…US-007 | 完成 | monorepo、协议、store、core、server、鉴权、频道/消息、WS |
 | US-008 | **PASS**（按对抗验证判据） | 任务发布、状态机、CAS、超时回收、启动回收 |
-| US-009 | 未开始 | 竞标引擎 + 授标 CAS；11 条 AC 待实现 |
-| US-010…US-021 | 未开始 | `message.history`、审核/改派、SDK、CLI、mock agents、Web、Docker |
+| US-009 | **完成（本地验证）** | 竞标、五维评分、冷启动探索、CAS 授标、并发冲突 |
+| US-010…US-021 | 未开始 | `message.history`、进度/完成/失败、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**357**
-（core 40 / protocol 44 / store 69 / server 204）。
+测试基线：**379**
+（core 41 / protocol 44 / store 69 / server 225）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -20,27 +20,38 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
 - `seed-admin` 的 `account.registered` 含 `secretHash`，replay 可重建凭证；
 - `expectedVersion` 已必填，所有 transition 都走 CAS。
 
-## 已实现的 RPC（11 / 21）
+US-009 的关键语义：
+
+- 第一次 `task.bid` 把任务从 `open` 推到 `bidding`；每次竞标都递增 task 聚合
+  version（保证 v5 `(aggregate, version)` 唯一），竞标窗口在 `awarded` 后关闭。
+- 同一 agent 重复竞标按覆盖语义（复用同一 bid 行/id）。
+- 五维权重默认 0.35/0.25/0.10/0.15/0.15，可配置且必须和为 1；历史成功率按
+  `history_confidence_threshold=5` 向 0.5 收缩；availability = 1/(1+activeTasks)。
+- `DEMO_MODE=true` 强制 `AlwaysExploreForDemo`；否则默认 5% 概率探索。
+- `task.award` 必填 `expectedVersion`；并发时第二个请求 `-32007`，事件日志仅一条
+  `task.awarded`；`task.awarded` 走 `withTransaction` 帧栈，提交后才 emit。
+- `task.bid` 限流 5/min/agent，复用 LRU `TokenBucketRegistry`。
+
+## 已实现的 RPC（14 / 21）
 
 | 分组 | 方法 |
 | --- | --- |
 | agent | `agent.register` / `agent.authenticate` / `agent.list` |
 | channel | `channel.create` / `channel.join` / `channel.leave` / `channel.list` |
 | message | `message.send` |
-| task | `task.publish` / `task.list` / `task.get` |
+| task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` |
 
 未注册、请求返回 `-32601`：
 
 - `message.history`
-- `task.bid` / `task.bids` / `task.award` / `task.progress` / `task.complete` /
-  `task.fail` / `task.review` / `task.reassign`
+- `task.progress` / `task.complete` / `task.fail` / `task.review` / `task.reassign`
 - `system.subscribe`
 
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| 竞标/授标/进度/审核/改派未实现 | US-009 / US-011 / US-013 | 任务发布后无法通过公开 API 流转 |
+| 进度/完成/失败/审核/改派未实现 | US-011 / US-013 | 任务可竞标/授标，但不能推进到 done/failed |
 | `message.new` 无持久化回放 | US-010 | 离线成员错过消息后无法补齐 |
 | 无 `task.cancel` RPC | US-013 | 管理员只能等 sweeper 回收 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
@@ -51,16 +62,12 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
 
 ## 下一步
 
-1. **US-009**：`task.bid/bids/award`、五维评分、冷启动探索、并发 award 冲突。
-   - 硬约束：`task.awarded` 必须走 `withTransaction` 帧栈后 emit；
-   - 并发测试必须断言第二个 award 收到 `-32007` 且事件日志仅一条 `task.awarded`；
-   - `config.demoMode=true` 时强制 `AlwaysExploreForDemo`。
-   - **US-011 派生约束**：产物 >1 MiB 时走 HTTP 上传 + WS 只传引用（URL/ID），
-     不得调大 WS `maxPayload`。
-2. US-010：`message.history`，补消息回放路径。
-3. US-011/013：`task.fail`、`task.cancel`、审核决策与改派。
-4. US-014：SDK（Web 必须复用它，不得自建第二套续传）。
-5. US-018：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
+1. **US-010**：`message.history`，补消息回放路径。
+2. **US-011**：`task.progress` / `task.complete` / `task.fail`；产物 >1 MiB 走
+   HTTP 上传 + WS 只传引用（URL/ID），不调大 WS `maxPayload`。
+3. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
+4. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）。
+5. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
 
 ## 溯源说明
 
@@ -69,9 +76,9 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
 溯源只能用文件内容 hash 对比。当前关键文件：
 
 - `apps/server/src/modules/tasks.ts` SHA-256
-  `0904cd3de814d62941f35662205669043a0e2b583bd993522564e0bf28c7f94e`
+  `3c9c7e92e1bb9340757eea008bd5faae8dac8e3495f74e6ed2e5d17106fb0568`
 - `apps/server/test/tasks.test.ts` SHA-256
-  `36556148e304e827249a86ae6b9f985dcea110f725cc31fa3da5bf5fbc433982`
+  `30eda8451444c789cba6d5794c73a2634f35f2f16880e4351094d9f78d83d9a4`
 
-（hash 会随 US-009 改动变化；记录的是 US-008 + 安全批次基线。）
+（hash 为 US-009 实现后的基线。）
 

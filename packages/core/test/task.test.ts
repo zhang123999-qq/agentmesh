@@ -188,6 +188,53 @@ describe('taskReducer', () => {
     expect(review('unheard-of').status).toBe('open');
   });
 
+  it('opens bidding on the first bid and never reopens an awarded task', () => {
+    let state = taskReducer(
+      initialTaskState(AGG),
+      makeEvent({
+        seq: 1,
+        version: 1,
+        type: 'task.published',
+        aggregateId: AGG,
+        payload: { title: 'x' },
+      }),
+    );
+    state = taskReducer(
+      state,
+      makeEvent({
+        seq: 2,
+        version: 2,
+        type: 'task.bid.placed',
+        aggregateId: AGG,
+        payload: { bidId: 'bid_1', agentId: 'agt_1', price: 10 },
+      }),
+    );
+    expect(state.status).toBe('bidding');
+
+    state = taskReducer(
+      state,
+      makeEvent({
+        seq: 3,
+        version: 3,
+        type: 'task.awarded',
+        aggregateId: AGG,
+        payload: { awardeeId: 'agt_1', awardedBy: 'admin' },
+      }),
+    );
+    state = taskReducer(
+      state,
+      makeEvent({
+        seq: 4,
+        version: 4,
+        type: 'task.bid.placed',
+        aggregateId: AGG,
+        payload: { bidId: 'bid_2', agentId: 'agt_2', price: 5 },
+      }),
+    );
+    expect(state.status).toBe('awarded');
+    expect(state.assignee).toBe('agt_1');
+  });
+
   it('records failures, reassignments and blocked dependencies', () => {
     const events = lifecycle([
       { type: 'task.published', payload: { title: 'x' } },

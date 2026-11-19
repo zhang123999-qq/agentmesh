@@ -101,7 +101,15 @@ export interface BuildServerOptions {
    */
   readonly registerTasks?: boolean;
   /** Task-module overrides (TTL / id factory / clock) — mostly for tests. */
-  readonly tasks?: Omit<TasksModuleOptions, 'db' | 'tasks' | 'events' | 'workspaceId'>;
+  readonly tasks?: Omit<
+    TasksModuleOptions,
+    | 'db'
+    | 'tasks'
+    | 'taskBids'
+    | 'accounts'
+    | 'events'
+    | 'workspaceId'
+  >;
   /** Reclaim sweep interval in ms (defaults to the config value). */
   readonly taskReclaimIntervalMs?: number;
   /** Serve the WebSocket gateway (default: on whenever a store is wired). */
@@ -290,8 +298,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       ...options.tasks,
       db: store.db,
       tasks: store.repos.tasks,
+      taskBids: store.repos.taskBids,
+      accounts: store.repos.accounts,
       events,
       workspaceId: 'default',
+      demoMode: config.demoMode,
       openTtlSeconds: options.tasks?.openTtlSeconds ?? config.taskOpenTtlSeconds,
     });
     app.decorate('tasks', tasks);

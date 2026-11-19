@@ -45,7 +45,8 @@ docs                本目录
 - **聚合 ID**：`account:<id>` / `channel:<id>` / `message:<id>` / `task:<id>`。
 - **写入**：`EventStore.append` 在同一 `IMMEDIATE` 事务内计算 per-aggregate `version`
   与 `prevHash`；`withTransaction` 维护事务帧栈，**只在最外层提交后**触发
-  `onAppend`，回滚不推送。
+  `onAppend`，回滚不推送。竞标事件也占据 task 聚合的版本序列，因此 bid 会递增
+  task version。
 - **读取**：`loadAggregate` / `readFrom` / `readAfter` / `head`。
 - **重放**：`replayAggregate`，或 `snapshot + seq > snapshot.seq` 增量重放。
 - **快照**：`snapshots(aggregate_id, version)`，派生物，可随时删除重建。
@@ -76,8 +77,12 @@ docs                本目录
   - 实时推送订阅 `EventsDao.onAppend`，domain-only 事件不推送；
   - presence（进程内）、心跳、连接级/agent 级软限流；
   - Origin allow-list（CSWSH 防护）与 1 MiB `maxPayload`。
-- 业务模块：账号（US-005）、频道/消息（US-007）、任务（US-008）。
-- 已注册 11 / 21 个协议方法；竞标、授标、审核、改派等仍缺失（见 [status.md](status.md)）。
+- 业务模块：账号（US-005）、频道/消息（US-007）、任务与竞标/授标（US-008/009）。
+- 已注册 14 / 21 个协议方法；进度、完成/失败、审核、改派、消息历史仍缺失
+  （见 [status.md](status.md)）。
+- **竞标事件与版本**：第一次 bid 把 `open → bidding`；每次 bid 都递增 task 聚合
+  version（v5 唯一索引要求一个 `(aggregate, version)` 只对应一个事件）。
+  `task.awarded` 是状态迁移事件，在 `withTransaction` 内 append，提交后 emit。
 
 ## 测试金字塔
 

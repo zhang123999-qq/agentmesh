@@ -32,6 +32,8 @@
   数据库与事件只存 SHA-256 摘要。
 - secret 是人不可猜测的随机值，因此裸 SHA-256 足够，不需要 KDF。
 - `agent.register` 匿名，按远程地址限流（默认 30 次/分钟）；超限 `-32005`。
+- `task.bid` 按 agent 限流 5 次/分钟（复用 LRU `TokenBucketRegistry`）；超限
+  `-32005`。`task.bids` / `task.award` 仅 admin。
 - `seed:admin` 仅本地 CLI，不暴露 RPC；幂等，第二次打印 `admin already exists`。
 
 ## 传输与 WS

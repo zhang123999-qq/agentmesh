@@ -27,6 +27,7 @@ describe('loadConfig', () => {
     expect(config.logLevel).toBe('info');
     expect(config.version).toBe(SERVER_VERSION);
     expect(config.isProduction).toBe(false);
+    expect(config.demoMode).toBe(false);
   });
 
   it('reads overrides from the environment', () => {
@@ -37,6 +38,7 @@ describe('loadConfig', () => {
       DB_PATH: '/data/agentmesh.db',
       JWT_SECRET: '0123456789abcdef0123456789abcdef',
       ALLOWED_ORIGINS: 'https://app.example.com',
+      DEMO_MODE: 'true',
       LOG_LEVEL: 'debug',
       SERVER_VERSION: '9.9.9',
     });
@@ -49,6 +51,7 @@ describe('loadConfig', () => {
       version: '9.9.9',
       isProduction: true,
       allowMissingOrigin: true,
+      demoMode: true,
     });
   });
 

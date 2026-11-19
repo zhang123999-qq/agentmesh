@@ -2,6 +2,36 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-19 — US-009 竞标引擎与授标 CAS
+
+测试基线：**379**（core 41 / protocol 44 / store 69 / server 225）。
+
+- 新增 `task.bid` / `task.bids` / `task.award`（注册方法 11 → 14 / 21）。
+- 第一次 bid 把任务 `open → bidding`；每次 bid 递增 task 聚合 version（v5 唯一约束）。
+- 同一 agent 重复 bid 覆盖同一 OR-Set 行/id，不新增 live bid。
+- 五维评分：技能 0.35 / 历史 0.25 / 可用性 0.10 / 报价 0.15 / ETA 0.15；
+  权重可配置且必须和为 1；历史成功率向 0.5 收缩（阈值 5）。
+- 冷启动探索：默认 `ProbabilisticExploration(rate=0.05)`；`DEMO_MODE=true` 时
+  `AlwaysExploreForDemo`；`task.awarded.payload.exploration` 标记。
+- `task.award` 必填 `expectedVersion`；并发 award：一个成功、一个 `-32007`，
+  事件日志仅一条 `task.awarded`。
+- `task.awarded` 在 `withTransaction` 内 append，帧栈在提交后 emit。
+- `task.bid` 5/min/agent，复用 LRU `TokenBucketRegistry`；`task.bids`/`task.award`
+  仅 admin；日志不打印 approach 文本。
+- 测试新增：`task-scoring.test.ts`、`task-bids.test.ts`；core bid 状态 reducer 测试。
+
+### US-009 假设/偏离
+
+- 方案未明确 `open → bidding` 的触发者；本实现选择**第一次 bid 触发**，并使用
+  `task.bid.placed` 事件承载状态变化（reducer 在 status 为 open/null 时推到
+  bidding），避免同一 version 写两条事件（v5 唯一索引）。
+- 每次 bid 递增 task 聚合 version，因此 award 的 `expectedVersion` 应为**最后一次
+  bid 之后**的版本。
+- 报价/ETA 归一采用当前 live bid 集合的 min-max；缺失 ETA 记为中性 0.5。
+- 手动 award 要求 awardee 有 live bid；无 bid 的 agent 不能直接授标。
+- `task.bid.received`（notification twin）未单独 append；持久化事件为
+  `task.bid.placed`。
+
 ## 2026-11-19 — 安全审核澄清
 
 测试基线：**357**（core 40 / protocol 44 / store 69 / server 204）。

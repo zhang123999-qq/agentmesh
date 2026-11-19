@@ -57,6 +57,8 @@ export const DEFAULT_JWT_ISSUER = 'agentmesh';
 
 /** Self-service `role: "admin"` registration is off unless explicitly enabled. */
 export const DEFAULT_ALLOW_ADMIN_SELF_REGISTER = false;
+/** Demo mode forces the deterministic exploration branch (US-009/US-017). */
+export const DEFAULT_DEMO_MODE = false;
 
 /**
  * `agent.authenticate` brute-force guard (US-005): an identity that fails
@@ -128,6 +130,8 @@ export interface ServerConfig {
   readonly jwtIssuer: string;
   /** Allow `agent.register` to mint an `admin` role (default false). */
   readonly allowAdminSelfRegister: boolean;
+  /** Force `AlwaysExploreForDemo` for deterministic demo runs. */
+  readonly demoMode: boolean;
   /** Failed `agent.authenticate` attempts tolerated per identity per window. */
   readonly authMaxFailedAttempts: number;
   /** Window (seconds) in which failures are counted. */
@@ -434,6 +438,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       'ALLOW_ADMIN_SELF_REGISTER',
       DEFAULT_ALLOW_ADMIN_SELF_REGISTER,
     ),
+    demoMode: parseBoolean(env.DEMO_MODE, 'DEMO_MODE', DEFAULT_DEMO_MODE),
     authMaxFailedAttempts: parsePositiveInt(
       env.AUTH_MAX_FAILED_ATTEMPTS,
       'AUTH_MAX_FAILED_ATTEMPTS',
@@ -559,6 +564,7 @@ export function describeConfig(config: ServerConfig): Record<string, unknown> {
     jwtIssuer: config.jwtIssuer,
     jwtExpiresInSeconds: config.jwtExpiresInSeconds,
     allowAdminSelfRegister: config.allowAdminSelfRegister,
+    demoMode: config.demoMode,
     authMaxFailedAttempts: config.authMaxFailedAttempts,
     authFailWindowSeconds: config.authFailWindowSeconds,
     authLockoutSeconds: config.authLockoutSeconds,

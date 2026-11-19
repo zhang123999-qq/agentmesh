@@ -17,6 +17,7 @@ plugin registry and pino structured logging.
 | `JWT_EXPIRES_IN_SECONDS` | `3600` | Access-token lifetime, 1…2592000 seconds. |
 | `JWT_ISSUER` | `agentmesh` | Written as `iss` and required on every token. |
 | `ALLOW_ADMIN_SELF_REGISTER` | `false` | Allow `agent.register` with `role: "admin"`. |
+| `DEMO_MODE` | `false` | Force `AlwaysExploreForDemo` for deterministic US-017 demo runs (US-009). |
 | `AUTH_MAX_FAILED_ATTEMPTS` | `5` | Failed `agent.authenticate` attempts per identity per window before a lockout (1…100). |
 | `AUTH_FAIL_WINDOW_SECONDS` | `60` | Length of the failure-counting window (1…86400). |
 | `AUTH_LOCKOUT_SECONDS` | `60` | Base lockout after too many failures; doubles on each repeat (1…86400). |
@@ -47,15 +48,18 @@ Invalid values fail fast at startup with `ConfigError` (field name included).
   to handlers as `ctx.auth` / `ctx.role`; a malformed/expired token fails the
   message with `-32001` instead of falling back to anonymous.
 
-## Tasks (US-008)
+## Tasks (US-008 / US-009)
 
-When a store is wired the server registers three task methods:
+When a store is wired the server registers six task methods:
 
 | Method | Roles | Notes |
 | --- | --- | --- |
 | `task.publish` | `admin` | Creates the task in `open` (version 1) and appends `task.published`. Params: `title` (required), `description?`, `requiredSkills?`, `budget?`, `deadline?` (epoch ms). |
 | `task.list` | `admin`, `agent` | Workspace tasks, optional `status` filter and `limit`/`offset` paging. |
-| `task.get` | `admin`, `agent` | One task by `taskId`, **including `version`** for US-009 CAS. |
+| `task.get` | `admin`, `agent` | One task by `taskId`, **including `version`** for CAS. |
+| `task.bid` | `admin`, `agent` | Params: `taskId`, `price`, `eta?` (minutes), `approach?`, `confidence?` (0–1). Allowed in `open`/`bidding`; the first bid opens `bidding`. Re-bidding overwrites the same live bid. Limit: 5 bids/min per agent (`-32005`). |
+| `task.bids` | `admin` | Live bid set for a task, newest last. |
+| `task.award` | `admin` | Params: `taskId`, `expectedVersion`, `awardeeId?`, `strategy?` (`manual`/`auto`). Manual requires the awardee to have a live bid; auto scores all live bids. CAS conflict is `-32007`; success appends exactly one `task.awarded`. |
 
 The lifecycle is one transition table (`modules/tasks.ts → TASK_TRANSITIONS`):
 `open → bidding → awarded → in_progress → review → done`, with `→ failed`
@@ -78,6 +82,29 @@ runs it on a timer that is cleared on close. `startServer` also sweeps once
 **before** listening, so a restart cannot serve an already-expired task as
 `open` until the first tick. `task.publish` rejects a `deadline` that is not in
 the future.
+
+### Bidding and scoring (US-009)
+
+- **Bid window.** `task.bid` is accepted while the task is `open` or `bidding`.
+  The first bid moves `open → bidding` and increments the task aggregate version;
+  every bid event occupies one version (v5 uniqueness). After `awarded` any bid
+  is `-32003` (`reason: "bidding_closed"`).
+- **Scoring.** Skill 0.35 + history 0.25 + availability 0.10 + price 0.15 +
+  ETA 0.15. Weights are configurable and must sum to 1. History shrinks toward
+  0.5 with `historyConfidenceThreshold=5`; availability is
+  `1/(1+activeTasks)` (assigned `awarded`/`in_progress` tasks). Price and ETA
+  are min-max normalised across the live bid set; a missing ETA is neutral.
+- **Exploration.** Default `ProbabilisticExploration(rate=0.05)`; eligible
+  bidders are skill-qualified with fewer than 5 finished tasks.
+  `DEMO_MODE=true` forces `AlwaysExploreForDemo` for deterministic US-017
+  demos. The selected `task.awarded` payload carries
+  `exploration: true|false`.
+- **Award CAS.** `task.award` requires `expectedVersion`; two concurrent awards
+  with the same version yield one success and one `-32007`, and exactly one
+  `task.awarded` event. The event is appended inside the transaction and emitted
+  by the frame stack only after commit.
+- **Rate limit.** Bid buckets use the shared LRU `TokenBucketRegistry`
+  (5/min, burst 5) — no unbounded per-agent map.
 
 There is no `task.cancel` RPC: `open → cancelled` is reached only by the
 internal reclaim sweeper. Manual cancellation is deferred to US-013, so an
