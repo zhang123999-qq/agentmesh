@@ -9,8 +9,8 @@
 | US-009 | 未开始 | 竞标引擎 + 授标 CAS；11 条 AC 待实现 |
 | US-010…US-021 | 未开始 | `message.history`、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**356**
-（core 40 / protocol 44 / store 69 / server 203）。
+测试基线：**357**
+（core 40 / protocol 44 / store 69 / server 204）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -64,7 +64,14 @@ US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键�
 
 ## 溯源说明
 
-本地副本最初没有 `.git`、没有 `prd.json`，与 qwenpaw 容器仓库（297 测试基线、
-提交链 `c8807d4…d508299`）的同源关系无法从本地证明。本地测试基线现在为 348；
-差异需要 qwenpaw 侧 `git log --oneline -- apps/server/src/modules/tasks.ts
-apps/server/test/tasks.test.ts` 与逐文件测试计数才能闭环。
+本地仓库是**独立初始化的 git 历史**（`a5cf1cc` 为 import 提交），与 qwenpaw 容器
+仓库（提交链 `c8807d4…d508299`）**没有共同祖先**，不能通过 `git log` 直接比较。
+溯源只能用文件内容 hash 对比。当前关键文件：
+
+- `apps/server/src/modules/tasks.ts` SHA-256
+  `0904cd3de814d62941f35662205669043a0e2b583bd993522564e0bf28c7f94e`
+- `apps/server/test/tasks.test.ts` SHA-256
+  `36556148e304e827249a86ae6b9f985dcea110f725cc31fa3da5bf5fbc433982`
+
+（hash 会随 US-009 改动变化；记录的是 US-008 + 安全批次基线。）
+

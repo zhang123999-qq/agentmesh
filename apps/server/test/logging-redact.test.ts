@@ -49,6 +49,20 @@ describe('log redaction', () => {
     expect(createLogger({ level: 'silent' })).toBeDefined();
   });
 
+  it('does not over-redact business payload/body fields', () => {
+    const { logger, lines } = makeCapturingLogger('info');
+    logger.info(
+      {
+        taskId: 'tsk_1',
+        payload: { title: 'keep this business payload', status: 'open' },
+        body: 'keep this business body',
+      },
+      'task.audit',
+    );
+    expect(lines[0]?.payload).toEqual({ title: 'keep this business payload', status: 'open' });
+    expect(lines[0]?.body).toBe('keep this business body');
+  });
+
   it('redacts request body/headers carried by an error object', () => {
     const { logger, lines } = makeCapturingLogger('error');
     logger.error(

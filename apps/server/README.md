@@ -295,10 +295,14 @@ no password KDF and no SQLCipher in this build.
   Browser WebSocket upgrades are checked against `ALLOWED_ORIGINS`
   (CSWSH defence). Non-browser clients without an `Origin` are governed by
   `ALLOW_MISSING_ORIGIN` (default true). Development also accepts
-  `localhost`/`127.0.0.1`/`[::1]`.
+  `localhost`/`127.0.0.1`/`[::1]`. **CSWSH assumes the token travels in the
+  `Authorization: Bearer` header, which browsers do not attach automatically.
+  If authentication ever moves the token into a cookie, you must also add a
+  CSRF token or `SameSite=Strict` and set `ALLOW_MISSING_ORIGIN=false`.**
 - **Input limits.** HTTP bodies and WS frames are capped at **1 MiB**
   (`bodyLimit` / `maxPayload`). The auth-failure, registration and per-agent
-  bucket maps are bounded and use **LRU** eviction, so an active identity's
+  bucket maps are bounded (capacity checked **before insert**, so they never
+  exceed the limit) and use **LRU** eviction, so an active identity's
   rate-limit state is never displaced by a flood of one-shot keys.
 - **Artifact transport (architecture decision).** Do **not** raise
   `maxPayload` for US-011 artifacts. Payloads above 1 MiB go through an HTTP
@@ -313,8 +317,10 @@ no password KDF and no SQLCipher in this build.
   them is deployment friction with no security gain. Set it to false only when
   every client is a browser.
 - **Logs.** pino redacts `authorization`, `secret`, `token`, `password` and
-  `secretHash` (top-level and nested). Handlers must still never pass a
-  credential to the logger.
+  `secretHash` (top-level and nested), plus precise error/request paths:
+  `err.body`, `err.request`, `err.payload`, `req.body`, `request.body`. It does
+  **not** use top-level `*.body`/`*.payload` wildcards, so normal business
+  `payload` logs remain intact.
 - **At rest.** SQLite is plaintext; rely on OS/volume encryption. The deployment
   must create the database parent directory with mode `700` (this repository has
   no Docker/部署 script yet — US-018 owns it). Database-level encryption via

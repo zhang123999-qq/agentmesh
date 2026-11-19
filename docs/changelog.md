@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-19 — 安全审核澄清
+
+测试基线：**357**（core 40 / protocol 44 / store 69 / server 204）。
+
+- **C 定性更正**：修复前三个限流器是 FIFO，攻击者可灌入一次性 key 把活跃
+  identity 的限流状态挤出——这是**限流绕过**，不是"淘汰策略不够优雅"。已改为 LRU。
+- **D 定性更正**：修复前错误路径 `err.body` 未脱敏，authenticate 失败日志可能把
+  secret 明文写入日志聚合/磁盘——这是**信息泄露面**。已覆盖 `err.body/err.request/
+  err.payload/req.body/request.body`，并移除顶层 `*.body`/`*.payload` 通配，避免
+  误脱敏业务 payload。
+- **LRU 时机**：三个限流器都在**插入前**检查容量，map 永不超限；淘汰顺序为 LRU。
+- **Origin 前提**：CSWSH 防护假设 token 走 `Authorization: Bearer`；若未来改 cookie，
+  必须加 CSRF/`SameSite=Strict` 且 `ALLOW_MISSING_ORIGIN=false`。
+- **溯源**：本地 git 历史独立于 qwenpaw，无共同祖先；改用文件 SHA-256 对比。
+
 ## 2026-11-19 — 安全补充 A–F
 
 测试基线：**356**（core 40 / protocol 44 / store 69 / server 203）。
@@ -9,9 +24,9 @@
 - **A**：生产 `ALLOWED_ORIGINS` 为空 → 启动 `ConfigError` fail fast（不再 warn + 启动）。
 - **B**：`ALLOW_MISSING_ORIGIN` 默认 **true（两个环境）** 并写入 README/config 注释。
 - **C**：`TokenBucketRegistry`、`AuthFailureLimiter`、`RegistrationLimiter` 全部改为
-  **LRU** 淘汰；活跃 identity 不会被一次性 key 洪泛挤掉，补测试锁定。
+  **LRU** 淘汰；修复前为 FIFO，存在限流绕过（活跃 key 可被一次性 key 洪泛挤出）。
 - **D**：错误路径日志脱敏测试：authenticate 失败、WS 握手失败、`err.body/request/payload`；
-  redact 路径补齐 `err.body` / `err.request` / `err.payload` / `*.body` / `*.payload`。
+  修复前 `err.body` 未覆盖，存在 secret 明文进入日志的风险。
 - **E**：记录产物传输决策：WS `maxPayload` 保持 1 MiB，US-011 产物走 HTTP 上传 +
   WS 引用（URL/ID）。
 - **F**：记录 `clockTolerance: 5s` 的单机/时钟同步前提与多实例 NTP/≤30s 建议。
