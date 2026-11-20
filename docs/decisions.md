@@ -15,6 +15,9 @@
 | 事件推送只在 `withTransaction` 最外层提交后 emit | 防幽灵推送 + seq 复用导致真事件被去重丢掉 |
 | WS `maxPayload` 保持 1 MiB | 产物走 HTTP 上传 + WS 引用，不靠调大帧上限 |
 | 限流器上限采用 LRU | 活跃 agent/identity 的限流状态不会被一次性 key 洪泛挤掉 |
+| progress 不递增 `tasks.version` | 第一次 progress 启动 `awarded → in_progress`，之后原地更新，避免 complete/fail 的 CAS 被高频进度挤掉 |
+| `task.complete` 进入 `review` | `done` 由审核 approve 触发；`completedAt` 在 approve 时写入 |
+| 子任务 DAG 使用 `tasks.parent_id` | MVP 单父 DAG；非父子依赖是 US-022+ 候选 |
 
 ## 安全
 

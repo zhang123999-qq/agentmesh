@@ -18,6 +18,8 @@ export interface Task {
   assignee: string | null;
   /** Optimistic-concurrency counter; incremented by CAS updates only. */
   version: number;
+  /** Completion percentage 0-100; updated in place without a version bump. */
+  progress: number;
   parentId: string | null;
   deadline: number | null;
   meta: JsonRecord | null;
@@ -36,6 +38,7 @@ export interface CreateTaskInput {
   status?: TaskStatus;
   assignee?: string | null;
   version?: number;
+  progress?: number;
   parentId?: string | null;
   deadline?: number | null;
   meta?: JsonRecord | null;
@@ -54,6 +57,7 @@ export type UpdateTaskPatch = Partial<
     | 'budget'
     | 'status'
     | 'assignee'
+    | 'progress'
     | 'parentId'
     | 'deadline'
     | 'meta'
@@ -80,6 +84,7 @@ interface TaskRow {
   status: string;
   assignee: string | null;
   version: number;
+  progress: number;
   parent_id: string | null;
   deadline: number | null;
   meta: string | null;
@@ -99,6 +104,7 @@ function mapTask(row: TaskRow): Task {
     status: row.status as TaskStatus,
     assignee: row.assignee,
     version: row.version,
+    progress: row.progress,
     parentId: row.parent_id,
     deadline: row.deadline,
     meta: parseJsonColumn<JsonRecord | null>(row.meta, null),
@@ -144,6 +150,10 @@ function buildTaskSet(
     sets.push('assignee = ?');
     params.push(patch.assignee);
   }
+  if (patch.progress !== undefined) {
+    sets.push('progress = ?');
+    params.push(patch.progress);
+  }
   if (patch.parentId !== undefined) {
     sets.push('parent_id = ?');
     params.push(patch.parentId);
@@ -179,6 +189,7 @@ export class TasksDao {
       status: input.status ?? 'draft',
       assignee: input.assignee ?? null,
       version: input.version ?? 0,
+      progress: input.progress ?? 0,
       parent_id: input.parentId ?? null,
       deadline: input.deadline ?? null,
       meta: input.meta === undefined || input.meta === null ? null : toJsonColumn(input.meta, {}),
@@ -191,10 +202,10 @@ export class TasksDao {
       .prepare(
         `INSERT INTO tasks (
            id, title, description, required_skills, budget, status, assignee, version,
-           parent_id, deadline, meta, blocked_by, created_at, updated_at, workspace_id
+           progress, parent_id, deadline, meta, blocked_by, created_at, updated_at, workspace_id
          ) VALUES (
            @id, @title, @description, @required_skills, @budget, @status, @assignee, @version,
-           @parent_id, @deadline, @meta, @blocked_by, @created_at, @updated_at, @workspace_id
+           @progress, @parent_id, @deadline, @meta, @blocked_by, @created_at, @updated_at, @workspace_id
          )`,
       )
       .run(row);

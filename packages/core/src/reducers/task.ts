@@ -209,16 +209,20 @@ export const taskReducer: Reducer<TaskState> = (state, event: CoreEvent) => {
         reviewDecision: decision,
         reviewComment: readString(payload, 'comment') ?? next.reviewComment,
         status: mappedStatus ?? next.status,
+        ...(mappedStatus === 'done'
+          ? { progress: 100, completedAt: event.ts }
+          : {}),
         updatedAt: event.ts,
       };
     }
 
     case 'task.completed': {
+      // `complete` submits the deliverable for review; approval (US-013) moves
+      // the task to `done`.
       return {
         ...next,
-        status: 'done',
+        status: 'review',
         progress: 100,
-        completedAt: event.ts,
         updatedAt: event.ts,
       };
     }

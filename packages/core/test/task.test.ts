@@ -83,7 +83,7 @@ describe('taskReducer', () => {
       budget: 100,
       parentId: 'task:tsk_0',
       deadline: 9999,
-      status: 'done',
+      status: 'review',
       assignee: 'agt_1',
       awardedBy: 'agt_admin',
       exploration: true,
@@ -96,7 +96,7 @@ describe('taskReducer', () => {
     expect(Object.keys(state.bids).sort()).toEqual(['bid_1', 'bid_2']);
     expect(state.bids['bid_1']).toMatchObject({ agentId: 'agt_1', price: 50, eta: 30 });
     expect(state.bids['bid_2']).toMatchObject({ agentId: 'agt_2', price: 60, eta: null });
-    expect(state.completedAt).toBe(1006);
+    expect(state.completedAt).toBeNull();
     expect(state.createdAt).toBe(1000);
   });
 

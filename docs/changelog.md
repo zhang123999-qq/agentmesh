@@ -2,6 +2,38 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-20 — US-011 任务执行、进度与 DAG
+
+测试基线：**412**（core 41 / protocol 47 / store 70 / server 254）。
+
+- 新增 `task.progress` / `task.complete` / `task.fail`（注册方法 15 → 18 / 21）。
+- `tasks.progress` 列（v7）；第一次 progress 做 `awarded → in_progress` CAS，
+  后续 progress **不递增 version**；并发 progress 均成功、最后写入者胜。
+- `task.complete`：`in_progress → review`（CAS、progress 100、`task.completed`）；
+  父任务完成要求所有 `parentId` 子任务 `done`，否则 `-32003 subtasks_incomplete`。
+- `task.fail`：`awarded/in_progress → failed`（CAS、`task.failed`）；父任务非终态时
+  保持 `in_progress`，`blockedBy` 合并子任务 id，并追加 `task.dependency.failed`。
+- 终态吸收：父任务 `done/failed/cancelled` 后，子任务失败不再修改父任务。
+- DAG 复用已有 `tasks.parent_id`（单父 DAG），无新增依赖表；`assertParentChainAcyclic`
+  防御自环/间接环。
+- 协议：`task.completed` / `task.failed` 从 domain-only 移入 notification，新增
+  payload schema；`task.progress` / `task.complete` / `task.fail` 参数 schema 加入
+  `packages/protocol/src/params.ts`（SDK 类型来源）；v7 部分唯一索引排除
+  `task.progress.updated` / `task.dependency.failed`，允许 side-effect 事件共享版本。
+- 测试：progress 0/50/100 与 10 次连续上报 version 不变、并发 progress、complete/
+  fail CAS 冲突、非 assignee `-32002`、状态非法 `-32003`、子任务聚合、失败传播、
+  终态吸收、自环/间接环、WS `task.progress.updated` 推送。
+
+### US-011 偏离说明
+
+- 提示词要求“对 awarded 任务调 progress → -32003”。为保证生命周期可达，本实现
+  把**首次 progress 作为 `awarded → in_progress` 的显式启动**；对 `review` 等
+  其他状态仍返回 `-32003`。否则 `awarded` 没有进入 `in_progress` 的公开路径。
+- `task.completed` 语义调整为“提交审核（review）”，`done` 由 US-013 的
+  review approve 触发；`completedAt` 在 approve 时写入。
+- DAG 选择 A（复用 `tasks.parent_id`）；非父子依赖列为 US-022+ 候选。
+- 产物只传引用，不新增 HTTP 上传端点；上传端点归 US-011 补充/US-018。
+
 ## 2026-11-20 — US-010 消息历史与离线补偿
 
 测试基线：**392**（core 41 / protocol 44 / store 69 / server 238）。

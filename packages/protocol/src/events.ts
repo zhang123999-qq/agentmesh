@@ -42,6 +42,8 @@ export const NOTIFICATION_EVENT_TYPES = [
   'task.bid.received',
   'task.awarded',
   'task.progress.updated',
+  'task.completed',
+  'task.failed',
   'task.review.decided',
   'task.reassigned',
   'task.dependency.failed',
@@ -71,8 +73,7 @@ export const DOMAIN_ONLY_EVENT_TYPES = [
   'task.status.changed',
   'task.bid.placed',
   'task.progress.reported',
-  'task.completed',
-  'task.failed',
+  // `task.completed` / `task.failed` are notifications (added in US-011).
 ] as const;
 
 export const EVENT_TYPES = [
@@ -156,6 +157,23 @@ export const taskProgressUpdatedPayloadSchema = z.object({
   at: z.number().int().nonnegative().optional(),
 });
 export type TaskProgressUpdatedPayload = z.infer<typeof taskProgressUpdatedPayloadSchema>;
+
+/** Deliverable submitted for review (`in_progress → review`). */
+export const taskCompletedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  /** Artifact references (URLs/IDs); large content goes through HTTP upload. */
+  artifacts: z.array(z.string()).optional(),
+  note: z.string().optional(),
+  at: z.number().int().nonnegative().optional(),
+});
+export type TaskCompletedPayload = z.infer<typeof taskCompletedPayloadSchema>;
+
+export const taskFailedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  reason: z.string().optional(),
+  at: z.number().int().nonnegative().optional(),
+});
+export type TaskFailedPayload = z.infer<typeof taskFailedPayloadSchema>;
 
 export const TASK_REVIEW_DECISIONS = ['approve', 'reject', 'request-revision'] as const;
 export const taskReviewDecisionSchema = z.enum(TASK_REVIEW_DECISIONS);
@@ -268,6 +286,8 @@ export const eventPayloadSchemas = {
   'task.bid.received': taskBidReceivedPayloadSchema,
   'task.awarded': taskAwardedPayloadSchema,
   'task.progress.updated': taskProgressUpdatedPayloadSchema,
+  'task.completed': taskCompletedPayloadSchema,
+  'task.failed': taskFailedPayloadSchema,
   'task.review.decided': taskReviewDecidedPayloadSchema,
   'task.reassigned': taskReassignedPayloadSchema,
   'task.dependency.failed': taskDependencyFailedPayloadSchema,
@@ -356,6 +376,8 @@ export const eventNotificationSchema = z.discriminatedUnion('type', [
   eventNotificationOf('task.bid.received', taskBidReceivedPayloadSchema),
   eventNotificationOf('task.awarded', taskAwardedPayloadSchema),
   eventNotificationOf('task.progress.updated', taskProgressUpdatedPayloadSchema),
+  eventNotificationOf('task.completed', taskCompletedPayloadSchema),
+  eventNotificationOf('task.failed', taskFailedPayloadSchema),
   eventNotificationOf('task.review.decided', taskReviewDecidedPayloadSchema),
   eventNotificationOf('task.reassigned', taskReassignedPayloadSchema),
   eventNotificationOf('task.dependency.failed', taskDependencyFailedPayloadSchema),

@@ -106,6 +106,13 @@ export const TASK_READ_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'
 export const TASK_BID_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
 /** Roles allowed to inspect the bid set / award a task. */
 export const TASK_AWARD_ROLES: readonly AuthContext['role'][] = ['admin'];
+/** Roles that may report progress / complete / fail (subject to assignee check). */
+export const TASK_EXECUTION_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
+/** Limits for progress notes / artifacts (references only, not content). */
+export const MAX_PROGRESS_NOTE_LENGTH = 2000;
+export const MAX_FAIL_REASON_LENGTH = 2000;
+export const MAX_ARTIFACTS = 32;
+export const MAX_ARTIFACT_REF_LENGTH = 2048;
 /** Default bid budget: 5 bids per minute per agent. */
 export const DEFAULT_BID_RATE_PER_SECOND = 5 / 60;
 export const DEFAULT_BID_BURST = 5;
@@ -130,6 +137,10 @@ export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]
 /** True when `from → to` is a legal lifecycle step. */
 export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   return TASK_TRANSITIONS[from].includes(to);
+}
+
+function isTerminalStatus(status: TaskStatus): boolean {
+  return status === 'done' || status === 'failed' || status === 'cancelled';
 }
 
 function invalidTransition(taskId: string, from: TaskStatus, to: TaskStatus): ProtocolError {
@@ -187,6 +198,38 @@ function tooManyBids(retryAfterMs: number): ProtocolError {
     JsonRpcErrorCode.RateLimited,
     'Too many bids',
     { reason: 'too_many_bids', retryAfterMs },
+  );
+}
+
+function notAssignee(taskId: string, assignee: string | null): ProtocolError {
+  return new ProtocolError(
+    JsonRpcErrorCode.Forbidden,
+    'Only the assigned agent may report progress or finish this task',
+    { taskId, assignee, reason: 'not_assignee' },
+  );
+}
+
+function subtasksIncomplete(taskId: string, pending: readonly string[]): ProtocolError {
+  return new ProtocolError(
+    JsonRpcErrorCode.InvalidState,
+    `Task ${taskId} still has ${pending.length} incomplete subtask(s)`,
+    { taskId, pendingSubtaskIds: [...pending], reason: 'subtasks_incomplete' },
+  );
+}
+
+function parentTaskNotFound(taskId: string): ProtocolError {
+  return new ProtocolError(
+    JsonRpcErrorCode.InvalidParams,
+    `Parent task ${taskId} does not exist`,
+    { parentId: taskId, field: 'parentId' },
+  );
+}
+
+function parentCycle(taskId: string, chain: readonly string[]): ProtocolError {
+  return new ProtocolError(
+    JsonRpcErrorCode.InvalidState,
+    `Task parent chain contains a cycle at ${taskId}`,
+    { taskId, chain: [...chain], reason: 'dependency_cycle' },
   );
 }
 
@@ -331,6 +374,43 @@ function readOptionalStrategy(
   return raw;
 }
 
+function readProgressValue(input: Record<string, unknown>): number {
+  const raw = input.progress;
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 100) {
+    throw invalidParams('progress must be a number between 0 and 100', 'progress');
+  }
+  return raw;
+}
+
+function readOptionalArtifacts(
+  input: Record<string, unknown>,
+  field = 'artifacts',
+): string[] | undefined {
+  const raw = input[field];
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw)) {
+    throw invalidParams(`${field} must be an array of strings`, field);
+  }
+  if (raw.length > MAX_ARTIFACTS) {
+    throw invalidParams(`${field} must contain at most ${MAX_ARTIFACTS} entries`, field);
+  }
+  const artifacts: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') {
+      throw invalidParams(`${field} must contain only strings`, field);
+    }
+    const value = item.trim();
+    if (value.length === 0 || value.length > MAX_ARTIFACT_REF_LENGTH) {
+      throw invalidParams(
+        `each ${field} entry must be 1-${MAX_ARTIFACT_REF_LENGTH} characters`,
+        field,
+      );
+    }
+    artifacts.push(value);
+  }
+  return artifacts;
+}
+
 function readOptionalTimestamp(
   input: Record<string, unknown>,
   field: string,
@@ -388,6 +468,8 @@ export interface TaskView {
   readonly version: number;
   readonly parentId: string | null;
   readonly deadline: number | null;
+  /** Completion percentage 0-100 (updated in place without a version bump). */
+  readonly progress: number;
   /** Window close time; non-null means bidding is opened at publish. */
   readonly biddingDeadline: number | null;
   readonly blockedBy: string[];
@@ -444,6 +526,8 @@ export interface PublishTaskInput {
   readonly deadline?: number;
   /** When present, the task is created directly in `bidding`. */
   readonly biddingDeadline?: number;
+  /** Optional parent for a subtask DAG (MVP: single-parent DAG). */
+  readonly parentId?: string;
 }
 
 export interface ListTasksQuery {
@@ -502,6 +586,45 @@ export interface AwardResult {
   readonly seq: number;
 }
 
+export interface ProgressInput {
+  readonly taskId: string;
+  readonly progress: number;
+  readonly note?: string;
+  /** Artifact references (URLs/IDs); large content goes through HTTP upload. */
+  readonly artifacts?: readonly string[];
+}
+
+export interface ProgressResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
+export interface CompleteInput {
+  readonly taskId: string;
+  readonly expectedVersion: number;
+  readonly note?: string;
+  readonly artifacts?: readonly string[];
+}
+
+export interface CompleteResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
+export interface FailInput {
+  readonly taskId: string;
+  readonly expectedVersion: number;
+  readonly reason?: string;
+}
+
+export interface FailResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
 export interface TasksModuleOptions {
   /** Connection used to wrap `CAS + event append` in one transaction. */
   readonly db: AgentMeshDatabase;
@@ -550,6 +673,7 @@ function toView(task: Task): TaskView {
     version: task.version,
     parentId: task.parentId,
     deadline: task.deadline,
+    progress: task.progress,
     biddingDeadline: readBiddingDeadline(task.meta),
     blockedBy: [...task.blockedBy],
     createdAt: task.createdAt,
@@ -675,6 +799,14 @@ export class TasksService {
     const requiredSkills = [...(input.requiredSkills ?? [])];
     const budget = input.budget ?? 0;
     const deadline = input.deadline ?? null;
+    const parentId = input.parentId ?? null;
+    if (parentId !== null) {
+      if (parentId === taskId) throw parentCycle(taskId, [taskId]);
+      if (this.#tasks.get(parentId, workspaceId) === undefined) {
+        throw parentTaskNotFound(parentId);
+      }
+      this.assertParentChainAcyclic(parentId, workspaceId);
+    }
     const biddingDeadline = input.biddingDeadline ?? null;
     if (deadline !== null && deadline <= createdAt) {
       // A task that is expired on arrival is immediately reclaimable but
@@ -696,7 +828,9 @@ export class TasksService {
         budget,
         status,
         version: 1,
+        progress: 0,
         deadline,
+        parentId,
         meta,
         createdAt,
         updatedAt: createdAt,
@@ -716,6 +850,7 @@ export class TasksService {
           publishedBy: actor.agentId,
           deadline,
           ...(biddingDeadline === null ? {} : { biddingDeadline }),
+          ...(parentId === null ? {} : { parentId }),
           createdAt,
         },
         ts: createdAt,
@@ -991,6 +1126,285 @@ export class TasksService {
     };
   }
 
+  // -------------------------------------------------------------- execution
+
+  /**
+   * Report progress. The first report on an `awarded` task is the
+   * `awarded → in_progress` status transition (CAS, version +1); subsequent
+   * reports update `tasks.progress` in place **without** touching the version.
+   */
+  reportProgress(
+    input: ProgressInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): ProgressResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    this.#assertAssignee(task, actor);
+    if (task.status !== 'awarded' && task.status !== 'in_progress') {
+      throw invalidTransition(task.id, task.status, 'in_progress');
+    }
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      this.#assertAssignee(current, actor);
+      if (current.status !== 'awarded' && current.status !== 'in_progress') {
+        throw invalidTransition(current.id, current.status, 'in_progress');
+      }
+
+      let version: number;
+      if (current.status === 'awarded') {
+        const changes = this.#tasks.updateWithVersion(
+          current.id,
+          current.version,
+          { status: 'in_progress', progress: input.progress },
+          { workspaceId, updatedAt: at },
+        );
+        if (changes === 0) {
+          const now = this.#tasks.get(current.id, workspaceId);
+          throw versionConflict(
+            current.id,
+            current.version,
+            now?.version ?? null,
+            current.status,
+            'in_progress',
+          );
+        }
+        version = current.version + 1;
+      } else {
+        const updated = this.#tasks.update(
+          current.id,
+          { progress: input.progress },
+          { workspaceId, updatedAt: at },
+        );
+        if (updated === undefined) throw notFoundTask(current.id);
+        version = current.version;
+      }
+
+      const event = this.#events.append({
+        aggregateId: aggregateIdOf('task', current.id),
+        type: 'task.progress.updated',
+        version,
+        payload: {
+          taskId: current.id,
+          agentId: actor.agentId,
+          progress: input.progress,
+          ...(input.note === undefined ? {} : { note: input.note }),
+          ...(input.artifacts === undefined ? {} : { artifacts: [...input.artifacts] }),
+          at,
+        },
+        ts: at,
+        workspaceId,
+      });
+
+      const row = this.#tasks.get(current.id, workspaceId);
+      if (row === undefined) throw notFoundTask(current.id);
+      return { row, event, version };
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  /**
+   * Submit the deliverable for review (`in_progress → review`). The assigned
+   * agent must have finished every subtask (`parentId` children are `done`).
+   */
+  complete(
+    input: CompleteInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): CompleteResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    this.#assertAssignee(task, actor);
+    if (task.status !== 'in_progress') {
+      throw invalidTransition(task.id, task.status, 'review');
+    }
+    this.#assertSubtasksDone(task.id, workspaceId);
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      this.#assertAssignee(current, actor);
+      if (current.status !== 'in_progress') {
+        throw invalidTransition(current.id, current.status, 'review');
+      }
+      this.#assertSubtasksDone(current.id, workspaceId);
+
+      const changes = this.#tasks.updateWithVersion(
+        current.id,
+        input.expectedVersion,
+        { status: 'review', progress: 100 },
+        { workspaceId, updatedAt: at },
+      );
+      if (changes === 0) {
+        const now = this.#tasks.get(current.id, workspaceId);
+        throw versionConflict(
+          current.id,
+          input.expectedVersion,
+          now?.version ?? null,
+          current.status,
+          'review',
+        );
+      }
+
+      const version = input.expectedVersion + 1;
+      const event = this.#events.append({
+        aggregateId: aggregateIdOf('task', current.id),
+        type: 'task.completed',
+        version,
+        payload: {
+          taskId: current.id,
+          ...(input.note === undefined ? {} : { note: input.note }),
+          ...(input.artifacts === undefined ? {} : { artifacts: [...input.artifacts] }),
+          at,
+        },
+        ts: at,
+        workspaceId,
+      });
+
+      const row = this.#tasks.get(current.id, workspaceId);
+      if (row === undefined) throw notFoundTask(current.id);
+      return { row, event, version };
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  /** Mark the task failed; propagates a block to a non-terminal parent. */
+  fail(
+    input: FailInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): FailResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    this.#assertAssignee(task, actor);
+    if (task.status !== 'awarded' && task.status !== 'in_progress') {
+      throw invalidTransition(task.id, task.status, 'failed');
+    }
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      this.#assertAssignee(current, actor);
+      if (current.status !== 'awarded' && current.status !== 'in_progress') {
+        throw invalidTransition(current.id, current.status, 'failed');
+      }
+
+      const changes = this.#tasks.updateWithVersion(
+        current.id,
+        input.expectedVersion,
+        { status: 'failed' },
+        { workspaceId, updatedAt: at },
+      );
+      if (changes === 0) {
+        const now = this.#tasks.get(current.id, workspaceId);
+        throw versionConflict(
+          current.id,
+          input.expectedVersion,
+          now?.version ?? null,
+          current.status,
+          'failed',
+        );
+      }
+
+      const version = input.expectedVersion + 1;
+      const event = this.#events.append({
+        aggregateId: aggregateIdOf('task', current.id),
+        type: 'task.failed',
+        version,
+        payload: {
+          taskId: current.id,
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+          at,
+        },
+        ts: at,
+        workspaceId,
+      });
+
+      if (current.parentId !== null) {
+        const parent = this.#tasks.get(current.parentId, workspaceId);
+        if (parent !== undefined && !isTerminalStatus(parent.status)) {
+          const blockedBy = [...new Set([...parent.blockedBy, current.id])];
+          // Metadata only: no version bump, so complete/fail CAS is unaffected.
+          this.#tasks.update(
+            parent.id,
+            { blockedBy },
+            { workspaceId, updatedAt: at },
+          );
+          this.#events.append({
+            aggregateId: aggregateIdOf('task', parent.id),
+            type: 'task.dependency.failed',
+            version: parent.version,
+            payload: {
+              parentTaskId: parent.id,
+              subtaskId: current.id,
+              blockedBy: [current.id],
+              ...(input.reason === undefined ? {} : { reason: input.reason }),
+            },
+            ts: at,
+            workspaceId,
+          });
+        }
+      }
+
+      const row = this.#tasks.get(current.id, workspaceId);
+      if (row === undefined) throw notFoundTask(current.id);
+      return { row, event, version };
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  /** Defensive DAG invariant: walk parent links and reject a cycle. */
+  assertParentChainAcyclic(
+    taskId: string,
+    workspaceId: string = this.#workspaceId,
+  ): void {
+    const seen = new Set<string>();
+    let current: string | null = taskId;
+    while (current !== null) {
+      if (seen.has(current)) {
+        throw parentCycle(current, [...seen, current]);
+      }
+      seen.add(current);
+      const task = this.#tasks.get(current, workspaceId);
+      if (task === undefined || task.parentId === null) return;
+      current = task.parentId;
+    }
+  }
+
+  #assertAssignee(task: Task, actor: AuthContext): void {
+    if (task.assignee === null || task.assignee !== actor.agentId) {
+      throw notAssignee(task.id, task.assignee);
+    }
+  }
+
+  #assertSubtasksDone(taskId: string, workspaceId: string): void {
+    const pending = this.#tasks
+      .list({ workspaceId, parentId: taskId })
+      .filter((child) => child.status !== 'done')
+      .map((child) => child.id);
+    if (pending.length > 0) throw subtasksIncomplete(taskId, pending);
+  }
+
   /**
    * Award preconditions with CAS precedence: if the caller's version is stale,
    * the answer is `-32007` even when a concurrent winner already moved the
@@ -1010,7 +1424,8 @@ export class TasksService {
     throw invalidTransition(task.id, task.status, 'awarded');
   }
 
-  /** Skills + finished/active counts for every bidder, used by auto-award. */  #statsForAgents(
+  /** Skills + finished/active counts for every bidder, used by auto-award. */
+  #statsForAgents(
     agentIds: readonly string[],
     workspaceId: string,
   ): Map<string, AgentScoringStats> {
@@ -1231,6 +1646,7 @@ export function registerTasksModule(
       const budget = readOptionalNonNegativeNumber(input, 'budget');
       const deadline = readOptionalTimestamp(input, 'deadline');
       const biddingDeadline = readOptionalTimestamp(input, 'biddingDeadline');
+      const parentId = readOptionalString(input, 'parentId', 128);
       const result = service.publish(
         {
           title,
@@ -1239,6 +1655,7 @@ export function registerTasksModule(
           ...(budget === undefined ? {} : { budget }),
           ...(deadline === undefined ? {} : { deadline }),
           ...(biddingDeadline === undefined ? {} : { biddingDeadline }),
+          ...(parentId === undefined ? {} : { parentId }),
         },
         auth,
         ctx.workspaceId,
@@ -1372,6 +1789,94 @@ export function registerTasksModule(
       return result;
     },
     { description: 'Award a bidding task with expectedVersion CAS (admin only)' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.progress,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_EXECUTION_ROLES);
+      const input = asParamsObject(params, METHODS.task.progress);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const progress = readProgressValue(input);
+      const note = readOptionalString(input, 'note', MAX_PROGRESS_NOTE_LENGTH);
+      const artifacts = readOptionalArtifacts(input);
+      const result = service.reportProgress(
+        {
+          taskId,
+          progress,
+          ...(note === undefined ? {} : { note }),
+          ...(artifacts === undefined ? {} : { artifacts }),
+        },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        progress: result.task.progress,
+        status: result.task.status,
+        version: result.version,
+        msg: 'task.progress.updated',
+      });
+      return result;
+    },
+    { description: 'Report progress (assigned agent; first report starts the task)' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.complete,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_EXECUTION_ROLES);
+      const input = asParamsObject(params, METHODS.task.complete);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const expectedVersion = readRequiredNonNegativeInteger(input, 'expectedVersion');
+      const note = readOptionalString(input, 'note', MAX_PROGRESS_NOTE_LENGTH);
+      const artifacts = readOptionalArtifacts(input);
+      const result = service.complete(
+        {
+          taskId,
+          expectedVersion,
+          ...(note === undefined ? {} : { note }),
+          ...(artifacts === undefined ? {} : { artifacts }),
+        },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        status: result.task.status,
+        version: result.version,
+        msg: 'task.completed',
+      });
+      return result;
+    },
+    { description: 'Submit for review (assigned agent; all subtasks must be done)' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.fail,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_EXECUTION_ROLES);
+      const input = asParamsObject(params, METHODS.task.fail);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const expectedVersion = readRequiredNonNegativeInteger(input, 'expectedVersion');
+      const reason = readOptionalString(input, 'reason', MAX_FAIL_REASON_LENGTH);
+      const result = service.fail(
+        { taskId, expectedVersion, ...(reason === undefined ? {} : { reason }) },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        status: result.task.status,
+        version: result.version,
+        msg: 'task.failed',
+      });
+      return result;
+    },
+    { description: 'Mark the task failed (assigned agent); blocks a live parent' },
   );
 
   return service;

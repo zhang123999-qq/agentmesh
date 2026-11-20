@@ -65,18 +65,21 @@ always oldest-first and include `nextBeforeSeq` / `nextAfterSeq` plus
 `hasMoreBefore` / `hasMoreAfter`. Every message's `seq` is the `seq` of its
 `message.created` event, so live and history data share one dedupe key.
 
-## Tasks (US-008 / US-009)
+## Tasks (US-008 / US-009 / US-011)
 
-When a store is wired the server registers six task methods:
+When a store is wired the server registers nine task methods:
 
 | Method | Roles | Notes |
 | --- | --- | --- |
-| `task.publish` | `admin` | Creates the task in `bidding` when `biddingDeadline?` is supplied (the window is open immediately); otherwise `open` (draft, not bid-able). Params: `title` (required), `description?`, `requiredSkills?`, `budget?`, `deadline?`, `biddingDeadline?` (epoch ms). |
-| `task.list` | `admin`, `agent` | Workspace tasks, optional `status` filter and `limit`/`offset` paging. |
-| `task.get` | `admin`, `agent` | One task by `taskId`, **including `version`** for CAS. |
-| `task.bid` | `admin`, `agent` | Params: `taskId`, `price`, `eta?` (minutes), `approach?`, `confidence?` (0–1). Only while status is `bidding` and before `biddingDeadline`; re-bidding overwrites the same live bid. Limit: 5 bids/min per agent (`-32005`). |
-| `task.bids` | `admin` | Live bid set for a task, newest last. |
-| `task.award` | `admin` | Params: `taskId`, `expectedVersion`, `awardeeId?`, `strategy?` (`manual`/`auto`). Manual requires the awardee to have a live bid; auto scores all live bids. CAS conflict is `-32007`; success appends exactly one `task.awarded`. |
+| `task.publish` | `admin` | Creates the task in `bidding` when `biddingDeadline?` is supplied; otherwise `open` (draft). Params include `parentId?` for a subtask. |
+| `task.list` | `admin`, `agent` | Workspace tasks, optional `status` filter and paging. |
+| `task.get` | `admin`, `agent` | One task by `taskId`, including `version`/`progress`. |
+| `task.bid` | `admin`, `agent` | Only while `bidding` and before `biddingDeadline`; re-bidding overwrites. 5/min per agent. |
+| `task.bids` | `admin` | Live bid set. |
+| `task.award` | `admin` | `expectedVersion` CAS; manual requires a live bid, auto scores. |
+| `task.progress` | assigned `agent` (or admin if assignee) | First report starts `awarded → in_progress`; later reports update progress **without** bumping version. |
+| `task.complete` | assigned `agent` | `in_progress → review` with `expectedVersion`; all `parentId` children must be `done`. |
+| `task.fail` | assigned `agent` | `awarded/in_progress → failed`; blocks a non-terminal parent via `blockedBy`. |
 
 The lifecycle is one transition table (`modules/tasks.ts → TASK_TRANSITIONS`):
 `open → bidding → awarded → in_progress → review → done`, with `→ failed`
@@ -127,6 +130,30 @@ the future.
   by the frame stack only after commit.
 - **Rate limit.** Bid buckets use the shared LRU `TokenBucketRegistry`
   (5/min, burst 5) — no unbounded per-agent map.
+
+### Execution and DAG (US-011)
+
+- **Progress does not bump `tasks.version`.** The first report performs the
+  `awarded → in_progress` CAS; later reports update `tasks.progress` in place
+  and append `task.progress.updated` at the current version (v7 partial index
+  allows it). Concurrent progress reports all succeed; the last write wins.
+- **Complete → review.** `task.complete` requires `expectedVersion`, sets
+  progress 100, appends `task.completed`, and moves `in_progress → review`.
+  Approval to `done` belongs to US-013.
+- **Fail → failed.** `task.fail` requires `expectedVersion` and appends
+  `task.failed`.
+- **Subtask DAG** uses the existing `tasks.parent_id` (single-parent DAG).
+  A parent can complete only when every child is `done`
+  (`-32003 reason: subtasks_incomplete`). Cycles are rejected by
+  `assertParentChainAcyclic`.
+- **Failure propagation.** A failed subtask keeps its parent in `in_progress`,
+  merges the child id into `blockedBy`, and appends `task.dependency.failed`.
+  A parent already `done/failed/cancelled` absorbs the event (no change).
+- **Notifications.** `task.progress.updated`, `task.completed`, `task.failed`
+  and `task.dependency.failed` are in `NOTIFICATION_EVENT_TYPES` and are
+  emitted by the transaction frame stack after commit.
+- **Artifacts.** Only references (URL/ID) travel over WS; content above 1 MiB
+  must use an HTTP upload (do not raise `maxPayload`).
 
 There is no `task.cancel` RPC: `open → cancelled` is reached only by the
 internal reclaim sweeper. Manual cancellation is deferred to US-013, so an

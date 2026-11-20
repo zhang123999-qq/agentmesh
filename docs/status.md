@@ -8,10 +8,11 @@
 | US-008 | **PASS**（按对抗验证判据） | 任务发布、状态机、CAS、超时回收、启动回收 |
 | US-009 | **完成（本地验证）** | 竞标、五维评分、冷启动探索、CAS 授标、并发冲突 |
 | US-010 | **完成（本地验证）** | `message.history` 双向 seq 游标、成员权限、离线补偿 |
-| US-011…US-021 | 未开始 | 进度/DAG、CRDT、审核/改派、SDK、CLI、mock agents、Web、Docker |
+| US-011 | **完成（本地验证）** | progress/complete/fail、父子 DAG、失败传播、终态吸收 |
+| US-012…US-021 | 未开始 | CRDT、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**392**
-（core 41 / protocol 44 / store 69 / server 238）。
+测试基线：**412**
+（core 41 / protocol 47 / store 70 / server 254）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -47,27 +48,43 @@ US-010 的关键语义：
 - 每条消息的 `seq` 就是 `events.seq`（`messages.seq` 同空间），实时流与 history
   共用同一去重键。
 
-## 已实现的 RPC（15 / 21）
+US-011 的关键语义：
+
+- `task.progress`：首次上报把 `awarded → in_progress`（CAS，version +1）；之后只更新
+  `tasks.progress`，**不递增 version**。并发 progress 都成功，最后写入者胜。
+- `task.complete`：`in_progress → review`（CAS，`expectedVersion` 必填），progress
+  置 100，追加 `task.completed` notification；父任务必须所有 `parentId` 子任务为
+  `done`，否则 `-32003 reason: subtasks_incomplete`。
+- `task.fail`：`awarded/in_progress → failed`（CAS），追加 `task.failed` notification；
+  若父任务存在且非终态，父任务保持 `in_progress`，`blockedBy` 合并子任务 id，并追加
+  `task.dependency.failed`。
+- **终态吸收**：父任务 `done/failed/cancelled` 后，子任务失败不再修改父任务。
+- DAG 使用已有 `tasks.parent_id`（单父 DAG）；`assertParentChainAcyclic` 防御环。
+- `progress/completed/failed/dependency.failed` 都是 notification，走
+  `withTransaction` 帧栈，提交后 emit。
+- 产物只传引用（URL/ID）；>1 MiB 走 HTTP 上传，不调大 WS `maxPayload`。
+
+## 已实现的 RPC（18 / 21）
 
 | 分组 | 方法 |
 | --- | --- |
 | agent | `agent.register` / `agent.authenticate` / `agent.list` |
 | channel | `channel.create` / `channel.join` / `channel.leave` / `channel.list` |
 | message | `message.send` / `message.history` |
-| task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` |
+| task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` / `task.progress` / `task.complete` / `task.fail` |
 
 未注册、请求返回 `-32601`：
 
-- `task.progress` / `task.complete` / `task.fail` / `task.review` / `task.reassign`
+- `task.review` / `task.reassign`
 - `system.subscribe`
 
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| 进度/完成/失败/审核/改派未实现 | US-011 / US-013 | 任务可竞标/授标，但不能推进到 done/failed |
-| `message.new` 无持久化回放 | US-010 | 离线成员错过消息后无法补齐 |
+| 审核/改派/取消未实现 | US-013 | 任务可到 `review`，但无法 approve/reject/reassign/cancel |
 | 无 `task.cancel` RPC | US-013 | 管理员只能等 sweeper 回收 |
+| CRDT 收敛层未实现 | US-012 | 现有处理是单写者/最后写入；无乱序收敛与业务不变量测试 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
@@ -76,12 +93,11 @@ US-010 的关键语义：
 
 ## 下一步
 
-1. **US-011**：`task.progress` / `task.complete` / `task.fail`；progress 不碰
-   `tasks.version`；产物 >1 MiB 走 HTTP 上传 + WS 只传引用（URL/ID），不调大
-   WS `maxPayload`。
-2. **US-012**：CRDT 收敛层（presence LWW、竞标 OR-Set）与业务不变量测试。
-3. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
-4. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）。
+1. **US-012**：CRDT 收敛层（presence LWW、竞标 OR-Set）与业务不变量测试。
+2. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
+3. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
+   `message.history` / `task.bid` / `task.award` 的 zod schema。
+4. **US-015…US-017**：adapters / CLI / 三智能体 demo。
 5. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
 
 ## 溯源说明
@@ -91,9 +107,11 @@ US-010 的关键语义：
 溯源只能用文件内容 hash 对比。当前关键文件：
 
 - `apps/server/src/modules/tasks.ts` SHA-256
-  `29ea99b43b0af9a57846a3fb7d2e96b49d1bfc61ddf208a96a19faa22a462b21`
+  `2d2c2cb4e8ad76b1c44e286c861283b27e1a3f96b2436ce9ef4e2f8f63bf805f`
 - `apps/server/test/tasks.test.ts` SHA-256
   `7b823e460e8f975a885a1b22215a905630063105335be133c42119e9095c6adf`
+- `apps/server/test/task-execution.test.ts` SHA-256
+  `c287174b494e8c62c58282af2afb4715c4a888930318892b2af856ed64970b4e`
 
-（hash 为 US-009 收尾修复后的基线。）
+（hash 为 US-011 后的基线。）
 

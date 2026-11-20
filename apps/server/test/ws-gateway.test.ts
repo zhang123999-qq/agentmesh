@@ -1023,3 +1023,69 @@ describe('ws live bid notification', () => {
     await adminClient.close();
   });
 });
+
+describe('ws live task progress notification', () => {
+  it('pushes task.progress.updated to an online admin', async () => {
+    const harness = await startHarness({
+      config: { allowAdminSelfRegister: true },
+      ws: { livePush: true },
+    });
+    const adminClient = await TestClient.open(harness.url);
+    await adminClient.request(
+      METHODS.agent.register,
+      { name: 'admin-progress', role: 'admin' },
+      'admin-progress-reg',
+    );
+    await adminClient.waitFor((frame) => frame.type === 'welcome');
+    const worker = await registerAgent(harness, 'worker-progress');
+
+    const published = await adminClient.request(
+      METHODS.task.publish,
+      { title: 'progress task', biddingDeadline: Date.now() + 60_000 },
+      'publish-progress',
+    );
+    const task = (published.result as { task?: { id?: string; version?: number } }).task;
+    expect(task?.id).toBeTruthy();
+    expect(task?.version).toBe(1);
+
+    await worker.client.request(
+      METHODS.task.bid,
+      { taskId: task?.id as string, price: 10 },
+      'bid-progress',
+    );
+    const awarded = await adminClient.request(
+      METHODS.task.award,
+      {
+        taskId: task?.id as string,
+        expectedVersion: 1,
+        awardeeId: worker.agentId,
+      },
+      'award-progress',
+    );
+    expect((awarded.result as { task?: { version?: number } }).task?.version).toBe(2);
+
+    const reported = await worker.client.request(
+      METHODS.task.progress,
+      { taskId: task?.id as string, progress: 40 },
+      'progress',
+    );
+    expect(reported.error).toBeUndefined();
+
+    const notification = await adminClient.waitFor(
+      (frame) =>
+        frame.method === 'task.progress.updated' &&
+        (
+          (frame.params as Record<string, unknown> | undefined)?.payload as
+            | Record<string, unknown>
+            | undefined
+        )?.taskId === task?.id,
+      { label: 'task.progress.updated live push' },
+    );
+    expect(notification.params).toMatchObject({
+      payload: { taskId: task?.id, progress: 40 },
+    });
+
+    await worker.client.close();
+    await adminClient.close();
+  });
+});

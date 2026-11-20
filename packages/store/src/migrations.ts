@@ -249,6 +249,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version_status
   WHERE type NOT IN ('task.bid.placed', 'task.bid.received');
 `;
 
+/**
+ * v7 — task progress + side-effect event versions.
+ *
+ * `tasks.progress` is updated in place by `task.progress` (no version bump);
+ * SQLite needs a column for that. The partial unique index from v6 is widened
+ * to exclude `task.progress.updated` and `task.dependency.failed`: both are
+ * side-effect notifications that can share the aggregate's current version
+ * with a status event (or with each other) without representing a new state.
+ */
+const TASK_PROGRESS_SQL = 'ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0';
+
+const SIDE_EFFECT_EVENT_INDEX_SQL = `
+DROP INDEX IF EXISTS uq_events_aggregate_version_status;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version_status
+  ON events(workspace_id, aggregate_id, version)
+  WHERE type NOT IN (
+    'task.bid.placed',
+    'task.bid.received',
+    'task.progress.updated',
+    'task.dependency.failed'
+  );
+`;
+
 const ACCOUNT_CREDENTIALS_SQL = 'ALTER TABLE accounts ADD COLUMN secret_hash TEXT';
 
 export const MIGRATIONS: readonly Migration[] = [
@@ -294,6 +317,16 @@ export const MIGRATIONS: readonly Migration[] = [
     name: 'bid_events_per_version',
     up: (db) => {
       db.exec(BID_EVENT_INDEX_SQL);
+    },
+  },
+  {
+    version: 7,
+    name: 'task_progress_and_side_effect_events',
+    up: (db) => {
+      if (!hasColumn(db, 'tasks', 'progress')) {
+        db.exec(TASK_PROGRESS_SQL);
+      }
+      db.exec(SIDE_EFFECT_EVENT_INDEX_SQL);
     },
   },
 ];

@@ -13,3 +13,4 @@ export * from './jsonrpc.js';
 export * from './events.js';
 export * from './frames.js';
 export * from './methods.js';
+export * from './params.js';

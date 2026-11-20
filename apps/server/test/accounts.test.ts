@@ -763,8 +763,11 @@ describe('HTTP transport wiring', () => {
       METHODS.task.award,
       METHODS.task.bid,
       METHODS.task.bids,
+      METHODS.task.complete,
+      METHODS.task.fail,
       METHODS.task.get,
       METHODS.task.list,
+      METHODS.task.progress,
       METHODS.task.publish,
     ]);
     expect(app.accounts).toBeInstanceOf(AccountsService);
