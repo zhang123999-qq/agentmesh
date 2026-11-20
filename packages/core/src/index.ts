@@ -25,3 +25,4 @@ export * from './reducer.js';
 export * from './reducers/index.js';
 export * from './replay.js';
 export * from './snapshot.js';
+export * from './crdt/index.js';

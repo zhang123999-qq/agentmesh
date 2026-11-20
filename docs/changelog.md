@@ -2,6 +2,22 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-20 — US-012 CRDT 收敛层
+
+测试基线：**422**（core 51 / protocol 47 / store 70 / server 254）。
+
+- 新增 `packages/core/src/crdt/or-set.ts`：纯 OR-Set（add/remove/merge/live/compact）。
+  tag=`<counter>|<writer>`；merge 交换/结合/幂等；同元素多 tag 只产生一个 live 元素。
+- 新增 `orSetFromBidRows` / `compactBids`：映射 `task_bids` 的 tombstone +
+  stable_frontier，压缩只删除已删除 tag，live 集合不变；**不新增表、无 v8 迁移**。
+- 新增 `packages/core/src/crdt/lww.ts`：LWW-Register / LWW-Map，stamp 为
+  `(logical counter, nodeId)`；离线用更高 stamp 的 `offline` 值表达，不硬删。
+- 收敛测试：多顺序 add/remove、乱序 merge、幂等 merge、压缩前后 live 一致、
+  LWW 同键并发收敛。
+- 业务不变量：重复 bid 仍只有一条 live；晚到 bid 不改变已授标 assignee；
+  心跳超时 terminate 会向其它连接广播 `offline`（新增 WS 测试）。
+- 任务归属仍由 CAS 负责，CRDT 不介入；无 RPC 外部行为变化。
+
 ## 2026-11-20 — US-011 任务执行、进度与 DAG
 
 测试基线：**412**（core 41 / protocol 47 / store 70 / server 254）。

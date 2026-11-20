@@ -340,6 +340,8 @@ describe('task.bid', () => {
     const late = errorOf(await h.bid(worker.token, { taskId: task.id, price: 50 }));
     expect(late.code).toBe(JsonRpcErrorCode.InvalidState);
     expect(late.data).toMatchObject({ reason: 'bidding_closed' });
+    // A late bid must never change ownership.
+    expect(h.repos.tasks.get(task.id)?.assignee).toBe(worker.agentId);
   });
 
   it('enforces the default 5 bids/minute budget', async () => {

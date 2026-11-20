@@ -54,6 +54,7 @@ const fast = replayAggregate(store, 'task:tsk_1', taskReducer, initialTaskState(
 | 哈希链 | `hashEvent` / `verifyEventChain` | append 默认写入 `prevHash = hash(上一条全局事件)`；MVP 只写不强制校验（审计可用） || Reducer | `accountReducer` / `channelReducer` / `messageReducer` / `taskReducer` | 纯函数 `(state, event) => state`，`reduceByKind` 按 kind 分发 |
 | Replay | `replayAggregate` / `replayFromSnapshot` | 全量重放；或快照 + `seq > snapshot.seq` 增量重放 |
 | 快照 | `SnapshotStore` / `Snapshotter` | `snapshots(aggregate_id, version)` 主键 upsert，`everyNEvents` 周期策略，`prune` 保留最新 N 条 |
+| CRDT | `crdt/or-set.ts` / `crdt/lww.ts` | OR-Set（竞标集合，stableFrontier 压缩）+ LWW-Register/Map（presence，逻辑时钟 + nodeId） |
 
 ## 聚合 ID 约定
 

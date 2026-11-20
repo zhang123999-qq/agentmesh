@@ -9,10 +9,11 @@
 | US-009 | **完成（本地验证）** | 竞标、五维评分、冷启动探索、CAS 授标、并发冲突 |
 | US-010 | **完成（本地验证）** | `message.history` 双向 seq 游标、成员权限、离线补偿 |
 | US-011 | **完成（本地验证）** | progress/complete/fail、父子 DAG、失败传播、终态吸收 |
-| US-012…US-021 | 未开始 | CRDT、审核/改派、SDK、CLI、mock agents、Web、Docker |
+| US-012 | **完成（本地验证）** | OR-Set 收敛/压缩、LWW presence、业务不变量 |
+| US-013…US-021 | 未开始 | 审核/改派/取消、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**412**
-（core 41 / protocol 47 / store 70 / server 254）。
+测试基线：**422**
+（core 51 / protocol 47 / store 70 / server 254）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -64,6 +65,21 @@ US-011 的关键语义：
   `withTransaction` 帧栈，提交后 emit。
 - 产物只传引用（URL/ID）；>1 MiB 走 HTTP 上传，不调大 WS `maxPayload`。
 
+US-012 的关键语义：
+
+- **OR-Set**（`packages/core/src/crdt/or-set.ts`）：add/remove/merge/live 全为纯函数；
+  merge 满足交换/结合/幂等；同元素多 tag 只产生一个 live 元素。
+- **压缩**：`compactOrSet(frontier)` 只删除 `<= frontier` 的**已删除 tag**及其死 add；
+  live add tag 永不删除，压缩前后 live 集合一致。
+- **task_bids 对接**：`orSetFromBidRows` 以 agentId 为元素、`createdAt|bidId` 为 tag；
+  `stable_frontier` 作为压缩 frontier；不新增表、不新增 v8 迁移。
+- **LWW-Register / LWW-Map**（`lww.ts`）：stamp=(counter,nodeId)，counter 为逻辑时钟，
+  nodeId 做 tie-break；merge 收敛且幂等；离线用更高 stamp 的 `offline` 值表达，
+  **不硬删**。
+- presence 的断开清除仍由网关的“最后一个 socket 关闭 / 心跳超时 terminate”路径驱动；
+  新增 WS 测试断言心跳终止会向其它连接广播 `offline`。
+- 任务归属仍走 CAS，不进入 CRDT；晚到 bid 不会改变已授标任务的 assignee。
+
 ## 已实现的 RPC（18 / 21）
 
 | 分组 | 方法 |
@@ -84,7 +100,6 @@ US-011 的关键语义：
 | --- | --- | --- |
 | 审核/改派/取消未实现 | US-013 | 任务可到 `review`，但无法 approve/reject/reassign/cancel |
 | 无 `task.cancel` RPC | US-013 | 管理员只能等 sweeper 回收 |
-| CRDT 收敛层未实现 | US-012 | 现有处理是单写者/最后写入；无乱序收敛与业务不变量测试 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
@@ -93,12 +108,11 @@ US-011 的关键语义：
 
 ## 下一步
 
-1. **US-012**：CRDT 收敛层（presence LWW、竞标 OR-Set）与业务不变量测试。
-2. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
-3. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
+1. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
+2. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
    `message.history` / `task.bid` / `task.award` 的 zod schema。
-4. **US-015…US-017**：adapters / CLI / 三智能体 demo。
-5. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
+3. **US-015…US-017**：adapters / CLI / 三智能体 demo。
+4. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
 
 ## 溯源说明
 

@@ -92,6 +92,19 @@ docs                本目录
   `task.dependency.failed` 是 side-effect notification，v7 部分唯一索引允许它们与
   状态事件共享版本。
 
+## CRDT 收敛层（US-012）
+
+- `packages/core/src/crdt/or-set.ts`：纯 OR-Set（add/remove/merge/live/compact）。
+  tag 为 `<counter>|<writer>`；`compactOrSet(frontier)` 只清理 `<= frontier` 的已删除
+  tag，live 集合保持不变。`orSetFromBidRows` 把 `task_bids`（tombstone +
+  stable_frontier）映射成收敛视图；不新增表/迁移。
+- `packages/core/src/crdt/lww.ts`：LWW-Register 与 LWW-Map，stamp 为
+  `(logical counter, nodeId)`；离线用更高 stamp 的 `offline` 值表达，不硬删。
+- **边界**：任务归属仍由 CAS 负责，CRDT 不参与；presence 的断开清除由 WS
+  “最后 socket 关闭 / 心跳超时 terminate”驱动。
+- 收敛性测试覆盖：不同 add/remove 顺序、乱序 merge、重复 merge 幂等、
+  压缩前后 live 集合一致、LWW 并发同键收敛。
+
 ## 测试金字塔
 
 - 单元：协议 schema、DAO/迁移、reducer、评分策略（未来）。

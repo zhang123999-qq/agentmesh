@@ -391,10 +391,11 @@ describe('ws heartbeat', () => {
     await client.close();
   });
 
-  it('terminates a socket that misses the heartbeat', async () => {
+  it('terminates a socket that misses the heartbeat and announces offline', async () => {
     const harness = await startHarness();
     const registrar = await registerAgent(harness, 'silent-peer');
     await registrar.client.close();
+    const observer = await registerAgent(harness, 'heartbeat-observer');
     const silent = await TestClient.open(harness.url, {
       ...authHeader(registrar.token),
       autoPong: false,
@@ -409,8 +410,21 @@ describe('ws heartbeat', () => {
     const closed = await silent.closed;
     expect(closed.code).toBeGreaterThanOrEqual(1000);
     await silent.closed;
+    const offline = await observer.client.waitFor(
+      (frame) =>
+        frame.method === 'presence.update' &&
+        (frame.params as Record<string, unknown> | undefined)?.agentId ===
+          registrar.agentId &&
+        (frame.params as Record<string, unknown> | undefined)?.status === 'offline',
+      { label: 'heartbeat offline presence' },
+    );
+    expect(offline.params).toMatchObject({
+      agentId: registrar.agentId,
+      status: 'offline',
+    });
     await delay(50);
     expect(harness.gateway.onlineAgents()).not.toContain(registrar.agentId);
+    await observer.client.close();
   });
 });
 

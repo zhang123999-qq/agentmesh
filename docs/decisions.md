@@ -18,6 +18,22 @@
 | progress 不递增 `tasks.version` | 第一次 progress 启动 `awarded → in_progress`，之后原地更新，避免 complete/fail 的 CAS 被高频进度挤掉 |
 | `task.complete` 进入 `review` | `done` 由审核 approve 触发；`completedAt` 在 approve 时写入 |
 | 子任务 DAG 使用 `tasks.parent_id` | MVP 单父 DAG；非父子依赖是 US-022+ 候选 |
+| OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
+| LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
+
+## US-011 progress 启动语义（选 A）
+
+**决定**：首次 `task.progress` 在 `awarded` 状态下执行 `awarded → in_progress` 的
+CAS（version +1）；后续 progress 只原地更新 `tasks.progress`，不碰 version。
+
+**理由**：当前没有 `task.start` RPC，若严格要求 progress 只接受 `in_progress`，
+`awarded` 任务没有任何公开路径进入执行态，生命周期会卡死。
+
+**被否决的替代方案**：
+- B：新增 `task.start` RPC，progress 完全不碰 version。语义更纯，但增加协议方法
+  与 SDK 入口；MVP 不采用。
+- C：`task.award` 直接进入 `in_progress`。会把授标与执行启动混在一起，CAS 语义
+  需要重审；MVP 不采用。
 
 ## 安全
 
