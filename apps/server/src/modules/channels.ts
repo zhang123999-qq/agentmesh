@@ -83,6 +83,9 @@ import type { HandlerRegistry } from '../registry.js';
 export const MAX_CHANNEL_NAME_LENGTH = 64;
 /** Longest accepted message body. */
 export const MAX_MESSAGE_BODY_LENGTH = 4000;
+/** Default / maximum page size for `message.history`. */
+export const DEFAULT_MESSAGE_HISTORY_LIMIT = 50;
+export const MAX_MESSAGE_HISTORY_LIMIT = 200;
 
 /** Roles allowed to mutate channels / send messages (`observer` is read-only). */
 export const CHANNEL_WRITE_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
@@ -175,6 +178,46 @@ export interface SendMessageResult {
   readonly delivered: number;
 }
 
+export interface MessageHistoryQuery {
+  readonly channelId: string;
+  /** Exclusive upper bound: only messages with `seq < beforeSeq`. */
+  readonly beforeSeq?: number;
+  /** Exclusive lower bound: only messages with `seq > afterSeq`. */
+  readonly afterSeq?: number;
+  /** Page size, 1..MAX_MESSAGE_HISTORY_LIMIT. Default 50. */
+  readonly limit?: number;
+}
+
+export interface MessageHistoryResult {
+  readonly channelId: string;
+  /** Oldest-first page. Every message carries its global `seq`. */
+  readonly messages: MessageView[];
+  readonly total: number;
+  readonly limit: number;
+  readonly nextBeforeSeq: number | null;
+  readonly nextAfterSeq: number | null;
+  readonly hasMoreBefore: boolean;
+  readonly hasMoreAfter: boolean;
+}
+
+function toMessageView(row: {
+  id: string;
+  channelId: string;
+  senderId: string;
+  body: string;
+  seq: number;
+  createdAt: number;
+}): MessageView {
+  return {
+    messageId: row.id,
+    channelId: row.channelId,
+    senderId: row.senderId,
+    body: row.body,
+    seq: row.seq,
+    createdAt: row.createdAt,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Param validation (structured `-32602` instead of leaking zod messages)
 // ---------------------------------------------------------------------------
@@ -249,9 +292,38 @@ function notFoundChannel(channelId: string): ProtocolError {
 function notAMember(channelId: string): ProtocolError {
   return new ProtocolError(
     JsonRpcErrorCode.Forbidden,
-    'Only channel members may send messages',
+    'Only channel members may access this channel',
     { channelId, reason: 'not_a_member' },
   );
+}
+
+function readOptionalSeq(
+  input: Record<string, unknown>,
+  field: string,
+): number | undefined {
+  const raw = input[field];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== 'number' || !Number.isSafeInteger(raw) || raw < 0) {
+    throw invalidParams(`${field} must be a non-negative integer`, field);
+  }
+  return raw;
+}
+
+function readHistoryLimit(input: Record<string, unknown>): number {
+  const raw = input.limit;
+  if (raw === undefined || raw === null) return DEFAULT_MESSAGE_HISTORY_LIMIT;
+  if (
+    typeof raw !== 'number' ||
+    !Number.isSafeInteger(raw) ||
+    raw <= 0 ||
+    raw > MAX_MESSAGE_HISTORY_LIMIT
+  ) {
+    throw invalidParams(
+      `limit must be between 1 and ${MAX_MESSAGE_HISTORY_LIMIT}`,
+      'limit',
+    );
+  }
+  return raw;
 }
 
 /**
@@ -597,10 +669,80 @@ export class ChannelsService {
     return { message, delivered };
   }
 
+  /**
+   * Page a channel's durable history by the global `seq` cursor.
+   *
+   * - `afterSeq` = forward compensation (strictly newer messages);
+   * - `beforeSeq` = backward paging (strictly older messages);
+   * - neither = newest page, returned oldest-first.
+   * The result is always ascending by `seq`. `seq` is the global event cursor,
+   * so a client can merge live pushes and this page with one dedupe key.
+   */
+  history(
+    query: MessageHistoryQuery,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): MessageHistoryResult {
+    const channel = this.#requireChannel(query.channelId, workspaceId);
+    if (!this.#members.isMember(channel.id, actor.agentId, channel.workspaceId)) {
+      throw notAMember(channel.id);
+    }
+
+    const limit = query.limit ?? DEFAULT_MESSAGE_HISTORY_LIMIT;
+    const forward = query.afterSeq !== undefined;
+    const rows = forward
+      ? this.#messages.listByChannel(channel.id, {
+          workspaceId: channel.workspaceId,
+          afterSeq: query.afterSeq,
+          ...(query.beforeSeq === undefined ? {} : { beforeSeq: query.beforeSeq }),
+          limit: limit + 1,
+        })
+      : this.#messages.listByChannel(channel.id, {
+          workspaceId: channel.workspaceId,
+          ...(query.beforeSeq === undefined ? {} : { beforeSeq: query.beforeSeq }),
+          limit: limit + 1,
+          order: 'desc',
+        });
+
+    const page = forward
+      ? rows.slice(0, limit)
+      : rows.slice(0, limit).reverse();
+    const first = page[0];
+    const last = page[page.length - 1];
+
+    const hasMoreBefore = forward
+      ? first !== undefined &&
+        this.#messages.listByChannel(channel.id, {
+          workspaceId: channel.workspaceId,
+          beforeSeq: first.seq,
+          limit: 1,
+        }).length > 0
+      : rows.length > limit;
+    const hasMoreAfter = forward
+      ? rows.length > limit
+      : last !== undefined &&
+        this.#messages.listByChannel(channel.id, {
+          workspaceId: channel.workspaceId,
+          afterSeq: last.seq,
+          limit: 1,
+        }).length > 0;
+
+    return {
+      channelId: channel.id,
+      messages: page.map(toMessageView),
+      total: this.#messages.count(channel.id, channel.workspaceId),
+      limit,
+      nextBeforeSeq: first?.seq ?? null,
+      nextAfterSeq: last?.seq ?? null,
+      hasMoreBefore,
+      hasMoreAfter,
+    };
+  }
+
   // ---------------------------------------------------------------- internal
 
-  #requireChannel(channelId: string) {
-    const channel = this.#channels.get(channelId, this.#workspaceId);
+  #requireChannel(channelId: string, workspaceId: string = this.#workspaceId) {
+    const channel = this.#channels.get(channelId, workspaceId);
     if (channel === undefined) throw notFoundChannel(channelId);
     return channel;
   }
@@ -751,6 +893,29 @@ export function registerChannelsModule(
       return result;
     },
     { description: 'Send a message to a channel you are a member of' },
+  );
+
+  registry.registerHandler(
+    METHODS.message.history,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, CHANNEL_READ_ROLES);
+      const input = asParamsObject(params, METHODS.message.history);
+      const channelId = readRequiredString(input, 'channelId', 128);
+      const beforeSeq = readOptionalSeq(input, 'beforeSeq');
+      const afterSeq = readOptionalSeq(input, 'afterSeq');
+      const limit = readHistoryLimit(input);
+      return service.history(
+        {
+          channelId,
+          ...(beforeSeq === undefined ? {} : { beforeSeq }),
+          ...(afterSeq === undefined ? {} : { afterSeq }),
+          limit,
+        },
+        auth,
+        ctx.workspaceId,
+      );
+    },
+    { description: 'Page channel history by global seq (members only)' },
   );
 
   return service;

@@ -48,6 +48,23 @@ Invalid values fail fast at startup with `ConfigError` (field name included).
   to handlers as `ctx.auth` / `ctx.role`; a malformed/expired token fails the
   message with `-32001` instead of falling back to anonymous.
 
+## Channels and messages (US-007 / US-010)
+
+| Method | Roles | Notes |
+| --- | --- | --- |
+| `channel.create` | `admin`, `agent` | Creator becomes the first member. |
+| `channel.join` / `channel.leave` | `admin`, `agent` | Idempotent; managing another agent requires `admin`. |
+| `channel.list` | `admin`, `agent`, `observer` | Workspace channels with member lists. |
+| `message.send` | `admin`, `agent` | Member-only; persists the row and pushes `message.new` to online members. |
+| `message.history` | `admin`, `agent`, `observer` | **Member-only**. Params: `channelId`, `beforeSeq?`, `afterSeq?`, `limit?` (1–200, default 50). |
+
+`message.history` pages by the **global `seq`** (the same cursor as the event
+stream and live `message.new` pushes): `afterSeq` catches up offline messages,
+`beforeSeq` pages backwards, and neither returns the newest page. Results are
+always oldest-first and include `nextBeforeSeq` / `nextAfterSeq` plus
+`hasMoreBefore` / `hasMoreAfter`. Every message's `seq` is the `seq` of its
+`message.created` event, so live and history data share one dedupe key.
+
 ## Tasks (US-008 / US-009)
 
 When a store is wired the server registers six task methods:

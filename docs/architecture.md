@@ -77,8 +77,8 @@ docs                本目录
   - 实时推送订阅 `EventsDao.onAppend`，domain-only 事件不推送；
   - presence（进程内）、心跳、连接级/agent 级软限流；
   - Origin allow-list（CSWSH 防护）与 1 MiB `maxPayload`。
-- 业务模块：账号（US-005）、频道/消息（US-007）、任务与竞标/授标（US-008/009）。
-- 已注册 14 / 21 个协议方法；进度、完成/失败、审核、改派、消息历史仍缺失
+- 业务模块：账号（US-005）、频道/消息与历史（US-007/010）、任务与竞标/授标（US-008/009）。
+- 已注册 15 / 21 个协议方法；进度、完成/失败、审核、改派仍缺失
   （见 [status.md](status.md)）。
 - **竞标事件与版本**：`task.publish` 带 `biddingDeadline` 时直接进入 `bidding`；
   bid **不递增** task version，而是以当前 version 追加 `task.bid.placed`（审计）

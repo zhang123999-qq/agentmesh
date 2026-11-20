@@ -7,10 +7,11 @@
 | US-001…US-007 | 完成 | monorepo、协议、store、core、server、鉴权、频道/消息、WS |
 | US-008 | **PASS**（按对抗验证判据） | 任务发布、状态机、CAS、超时回收、启动回收 |
 | US-009 | **完成（本地验证）** | 竞标、五维评分、冷启动探索、CAS 授标、并发冲突 |
-| US-010…US-021 | 未开始 | `message.history`、进度/完成/失败、审核/改派、SDK、CLI、mock agents、Web、Docker |
+| US-010 | **完成（本地验证）** | `message.history` 双向 seq 游标、成员权限、离线补偿 |
+| US-011…US-021 | 未开始 | 进度/DAG、CRDT、审核/改派、SDK、CLI、mock agents、Web、Docker |
 
-测试基线：**385**
-（core 41 / protocol 44 / store 69 / server 231）。
+测试基线：**392**
+（core 41 / protocol 44 / store 69 / server 238）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -38,18 +39,25 @@ US-009 的关键语义：
 - `biddingDeadline` 到期且无 live bid → `closeExpiredBidding` 将任务 `cancelled`；
   已有 bid 则保持 `bidding` 等待 award。
 
-## 已实现的 RPC（14 / 21）
+US-010 的关键语义：
+
+- `message.history` 仅频道成员可查（非成员 `-32002`），未知频道 `-32004`。
+- `beforeSeq` 向后翻页、`afterSeq` 向前增量补偿、都不传取最新一页；返回始终按
+  `seq` 升序，`nextBeforeSeq` / `nextAfterSeq` 为下一页游标。
+- 每条消息的 `seq` 就是 `events.seq`（`messages.seq` 同空间），实时流与 history
+  共用同一去重键。
+
+## 已实现的 RPC（15 / 21）
 
 | 分组 | 方法 |
 | --- | --- |
 | agent | `agent.register` / `agent.authenticate` / `agent.list` |
 | channel | `channel.create` / `channel.join` / `channel.leave` / `channel.list` |
-| message | `message.send` |
+| message | `message.send` / `message.history` |
 | task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` |
 
 未注册、请求返回 `-32601`：
 
-- `message.history`
 - `task.progress` / `task.complete` / `task.fail` / `task.review` / `task.reassign`
 - `system.subscribe`
 
@@ -68,9 +76,10 @@ US-009 的关键语义：
 
 ## 下一步
 
-1. **US-010**：`message.history`，补消息回放路径。
-2. **US-011**：`task.progress` / `task.complete` / `task.fail`；产物 >1 MiB 走
-   HTTP 上传 + WS 只传引用（URL/ID），不调大 WS `maxPayload`。
+1. **US-011**：`task.progress` / `task.complete` / `task.fail`；progress 不碰
+   `tasks.version`；产物 >1 MiB 走 HTTP 上传 + WS 只传引用（URL/ID），不调大
+   WS `maxPayload`。
+2. **US-012**：CRDT 收敛层（presence LWW、竞标 OR-Set）与业务不变量测试。
 3. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
 4. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）。
 5. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。

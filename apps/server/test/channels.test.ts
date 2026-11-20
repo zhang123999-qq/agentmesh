@@ -198,6 +198,17 @@ interface MessageResult {
   delivered: number;
 }
 
+interface HistoryResult {
+  channelId: string;
+  messages: MessageResult['message'][];
+  total: number;
+  limit: number;
+  nextBeforeSeq: number | null;
+  nextAfterSeq: number | null;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+}
+
 const apps: FastifyInstance[] = [];
 afterEach(async () => {
   await Promise.all(apps.splice(0).map((app) => app.close()));
@@ -756,5 +767,209 @@ describe('message broadcast over websocket', () => {
 
     await aliceSocket.close();
     await bobSocket.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// message.history (US-010)
+// ---------------------------------------------------------------------------
+
+describe('message.history', () => {
+  async function setup(
+    h: Harness,
+    name = 'history',
+  ): Promise<{ owner: { agentId: string; token: string }; channelId: string }> {
+    const owner = await h.register(`${name}-owner`);
+    const created = resultOf<ChannelResult>(
+      await h.call(METHODS.channel.create, { name }, { token: owner.token }),
+    );
+    return { owner, channelId: created.channel.channelId };
+  }
+
+  async function send(
+    h: Harness,
+    token: string,
+    channelId: string,
+    body: string,
+  ): Promise<MessageResult['message']> {
+    return resultOf<MessageResult>(
+      await h.call(METHODS.message.send, { channelId, body }, { token }),
+    ).message;
+  }
+
+  it('returns an empty page for a fresh channel', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+
+    const page = resultOf<HistoryResult>(
+      await h.call(METHODS.message.history, { channelId }, { token: owner.token }),
+    );
+    expect(page).toMatchObject({
+      channelId,
+      messages: [],
+      total: 0,
+      nextBeforeSeq: null,
+      nextAfterSeq: null,
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+    });
+  });
+
+  it('returns the newest page oldest-first with global seq cursors', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+    const sent = [];
+    for (let i = 1; i <= 5; i += 1) {
+      sent.push(await send(h, owner.token, channelId, `m${i}`));
+    }
+
+    const page = resultOf<HistoryResult>(
+      await h.call(
+        METHODS.message.history,
+        { channelId, limit: 2 },
+        { token: owner.token },
+      ),
+    );
+
+    expect(page.messages.map((message) => message.body)).toEqual(['m4', 'm5']);
+    expect(page.messages.map((message) => message.seq)).toEqual([
+      sent[3]?.seq,
+      sent[4]?.seq,
+    ]);
+    expect(page.total).toBe(5);
+    expect(page.limit).toBe(2);
+    expect(page.nextBeforeSeq).toBe(sent[3]?.seq);
+    expect(page.nextAfterSeq).toBe(sent[4]?.seq);
+    expect(page.hasMoreBefore).toBe(true);
+    expect(page.hasMoreAfter).toBe(false);
+  });
+
+  it('pages backwards with beforeSeq without gaps or duplicates', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+    const sent = [];
+    for (let i = 1; i <= 5; i += 1) {
+      sent.push(await send(h, owner.token, channelId, `m${i}`));
+    }
+
+    const collected: number[] = [];
+    let beforeSeq: number | undefined;
+    for (let guard = 0; guard < 10; guard += 1) {
+      const page = resultOf<HistoryResult>(
+        await h.call(
+          METHODS.message.history,
+          {
+            channelId,
+            limit: 2,
+            ...(beforeSeq === undefined ? {} : { beforeSeq }),
+          },
+          { token: owner.token },
+        ),
+      );
+      collected.unshift(...page.messages.map((message) => message.seq));
+      if (!page.hasMoreBefore || page.nextBeforeSeq === null) break;
+      beforeSeq = page.nextBeforeSeq;
+    }
+
+    expect(collected).toEqual(sent.map((message) => message.seq));
+    expect(new Set(collected).size).toBe(collected.length);
+  });
+
+  it('compensates forward with afterSeq (offline catch-up)', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+    await send(h, owner.token, channelId, 'before-1');
+    await send(h, owner.token, channelId, 'before-2');
+    const cutoff = (await send(h, owner.token, channelId, 'cutoff')).seq;
+
+    const missed = [
+      await send(h, owner.token, channelId, 'missed-1'),
+      await send(h, owner.token, channelId, 'missed-2'),
+    ];
+
+    const page = resultOf<HistoryResult>(
+      await h.call(
+        METHODS.message.history,
+        { channelId, afterSeq: cutoff, limit: 10 },
+        { token: owner.token },
+      ),
+    );
+    expect(page.messages.map((message) => message.body)).toEqual([
+      'missed-1',
+      'missed-2',
+    ]);
+    expect(page.messages.map((message) => message.seq)).toEqual(
+      missed.map((message) => message.seq),
+    );
+    expect(page.hasMoreAfter).toBe(false);
+
+    const firstOnly = resultOf<HistoryResult>(
+      await h.call(
+        METHODS.message.history,
+        { channelId, afterSeq: cutoff, limit: 1 },
+        { token: owner.token },
+      ),
+    );
+    expect(firstOnly.messages).toHaveLength(1);
+    expect(firstOnly.hasMoreAfter).toBe(true);
+    expect(firstOnly.nextAfterSeq).toBe(missed[0]?.seq);
+  });
+
+  it('returns history seq in the same global space as the event log', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+    const message = await send(h, owner.token, channelId, 'seq check');
+
+    const page = resultOf<HistoryResult>(
+      await h.call(METHODS.message.history, { channelId }, { token: owner.token }),
+    );
+    const created = h.events
+      .loadAggregate(`channel:${channelId}`)
+      .find((event) => event.type === 'message.created');
+    expect(page.messages[0]?.seq).toBe(message.seq);
+    expect(page.messages[0]?.seq).toBe(created?.seq);
+  });
+
+  it('rejects non-members with -32002 and unknown channels with -32004', async () => {
+    const h = makeHarness();
+    const { channelId } = await setup(h);
+    const outsider = await h.register('history-outsider');
+
+    const forbidden = errorOf(
+      await h.call(
+        METHODS.message.history,
+        { channelId },
+        { token: outsider.token },
+      ),
+    );
+    expect(forbidden.code).toBe(JsonRpcErrorCode.Forbidden);
+    expect(forbidden.data).toMatchObject({ reason: 'not_a_member' });
+
+    const missing = errorOf(
+      await h.call(
+        METHODS.message.history,
+        { channelId: 'chn_missing' },
+        { token: outsider.token },
+      ),
+    );
+    expect(missing.code).toBe(JsonRpcErrorCode.NotFound);
+  });
+
+  it('validates cursor and limit params with -32602', async () => {
+    const h = makeHarness();
+    const { owner, channelId } = await setup(h);
+
+    for (const params of [
+      { channelId, beforeSeq: -1 },
+      { channelId, afterSeq: 1.5 },
+      { channelId, limit: 0 },
+      { channelId, limit: 201 },
+      { channelId, limit: '10' },
+    ]) {
+      const error = errorOf(
+        await h.call(METHODS.message.history, params, { token: owner.token }),
+      );
+      expect(error.code).toBe(JsonRpcErrorCode.InvalidParams);
+    }
   });
 });

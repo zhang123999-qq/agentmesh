@@ -2,6 +2,20 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-20 — US-010 消息历史与离线补偿
+
+测试基线：**392**（core 41 / protocol 44 / store 69 / server 238）。
+
+- 新增 `message.history`（注册方法 14 → 15 / 21）。
+- 双向 seq 游标：`afterSeq` 增量补偿、`beforeSeq` 向后翻页、都不传取最新页；
+  返回始终 oldest-first，含 `nextBeforeSeq` / `nextAfterSeq` / `hasMoreBefore` /
+  `hasMoreAfter`。
+- 每条消息的 `seq` 与 `events.seq` 同空间，实时 `message.new` 与历史共用同一去重键。
+- 权限：仅频道成员可查（非成员 `-32002`）；未知频道 `-32004`；游标/limit 非法
+  `-32602`。
+- 测试：空频道、最新页、向后分页无重无漏、afterSeq 离线补偿、seq 与事件日志一致、
+  非成员拒绝、参数校验。
+
 ## 2026-11-19 — US-009 收尾（bidding 生命周期 / version / bid 通知）
 
 测试基线：**385**（core 41 / protocol 44 / store 69 / server 231）。

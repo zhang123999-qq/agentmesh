@@ -757,6 +757,7 @@ describe('HTTP transport wiring', () => {
       METHODS.channel.join,
       METHODS.channel.leave,
       METHODS.channel.list,
+      METHODS.message.history,
       METHODS.message.send,
       // US-008 / US-009 register the task lifecycle methods alongside them.
       METHODS.task.award,
