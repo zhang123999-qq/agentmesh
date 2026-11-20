@@ -55,6 +55,8 @@ npm run build               # 全包构建（--workspaces --if-present）
 npm run typecheck           # 全包类型检查
 npm run lint                # 全包 ESLint
 npm test                    # 全包单元测试（vitest，当前 392 个）
+npm run verify              # typecheck + lint + test（提交前统一校验）
+npm run audit               # npm audit --audit-level=high
 ```
 
 首个 admin（本地直连 SQLite，不经 HTTP/WS）：

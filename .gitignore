@@ -22,5 +22,12 @@ data/
 
 # logs / OS noise
 *.log
+*.pid
+*.tmp
+.cache/
 .DS_Store
 Thumbs.db
+
+# editor / IDE state
+.idea/
+.vscode/
