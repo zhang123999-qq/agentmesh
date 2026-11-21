@@ -1,0 +1,34 @@
+{
+  "name": "@agentmesh/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentMesh AgentAdapter interface and provider templates (grok / muse / hermes / openclaw / codex)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@agentmesh/protocol": "*",
+    "@agentmesh/sdk": "*"
+  },
+  "devDependencies": {
+    "vitest": "^5.1.0"
+  }
+}

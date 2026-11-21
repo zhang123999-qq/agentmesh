@@ -124,6 +124,18 @@ docs                本目录
 - 覆盖 21 个已注册 RPC；`system.subscribe` 仍是唯一未实现协议方法。
 - Web（US-019）与 CLI（US-016）必须复用该传输层，不得自建第二套续传。
 
+## Adapters（US-015）
+
+- `packages/adapters` 定义 `AgentAdapter`：register/authenticate/join/bid/progress/
+  complete/fail/review/subscribe/getCapabilities/close。
+- SDK client 由外部注入；adapter 不持有传输/重连/去重。
+- 能力声明在构造时固定，`getCapabilities()` 返回 skills/availability/
+  maxConcurrentTasks/supportsReview；服务端评分仍使用账号与任务数据。
+- `onAborted` 覆盖 cancelled / reassigned / not_assignee；`onReviewDecided`
+  转发 review 三分支。
+- grok / muse / hermes / openclaw / codex 五个模板共用 `BaseAgentAdapter`，
+  只做配置校验与能力声明，不调用真实 provider API。
+
 ## 测试金字塔
 
 - 单元：协议 schema、DAO/迁移、reducer、评分策略（未来）。

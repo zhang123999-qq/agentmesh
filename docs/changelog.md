@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-015 AgentAdapter 与 5 家模板
+
+测试基线：**451**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / server 268）。
+
+- 新增 `@agentmesh/adapters`：`AgentAdapter` 接口 + `BaseAgentAdapter` +
+  grok / muse / hermes / openclaw / codex 五个模板。
+- SDK client 外部注入；adapter 不复制 reconnect/dedupe/transport。
+- 能力静态声明并 `getCapabilities()` 暴露；服务端评分暂不消费该声明（用于 adapter
+  自身竞标决策）。
+- `onAborted`：cancel、reassign 走、`not_assignee` 三种触发；
+  `onReviewDecided` 转发 review 三分支。
+- 模板仅做配置校验与能力声明，不发真实网络请求；无 TODO 空壳。
+- 测试：5 家构造/校验、register、reassign/cancel/not_assignee、review 转发、
+  reassign-to-self 的 onTaskAssigned。
+
 ## 2026-11-21 — US-014 TypeScript SDK
 
 测试基线：**444**（core 51 / protocol 47 / store 71 / sdk 7 / server 268）。

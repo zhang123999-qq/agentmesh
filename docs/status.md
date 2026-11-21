@@ -12,10 +12,11 @@
 | US-012 | **完成（本地验证）** | OR-Set 收敛/压缩、LWW presence、业务不变量 |
 | US-013 | **完成（本地验证）** | review/reassign/cancel；任务可闭环到 done/failed/cancelled |
 | US-014 | **完成（本地验证）** | `@agentmesh/sdk`：传输无关、resume/去重/gap 策略、21 个类型化方法 |
-| US-015…US-021 | 未开始 | adapters、CLI、mock agents、Web、Docker |
+| US-015 | **完成（本地验证）** | `@agentmesh/adapters`：AgentAdapter + 5 家模板、中止/review 契约 |
+| US-016…US-021 | 未开始 | CLI、mock agents/demo、Web、Docker |
 
-测试基线：**444**
-（core 51 / protocol 47 / store 71 / sdk 7 / server 268）。
+测试基线：**451**
+（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / server 268）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -128,22 +129,36 @@ US-014 的关键语义：
   不是本页条数）；`message.history` / `task.bid` / `task.award` 参数 schema 已补进
   `packages/protocol/src/params.ts`。
 
+US-015 的关键语义：
+
+- `AgentAdapter` 接收**注入的** `AgentMeshClient`，不持有/复制传输、reconnect、dedupe。
+- 能力在构造时静态声明，`getCapabilities()` 返回
+  `{skills, availability, maxConcurrentTasks, supportsReview}`；服务端评分当前仍用
+  accounts/tasks 数据，adapter 声明用于自身竞标决策。
+- `onAborted` 在 `task.cancelled`、被 reassign 走、以及执行 RPC 返回
+  `ForbiddenError data.reason=not_assignee` 时触发；reason =
+  `cancelled | reassigned | not_assignee`。
+- `onReviewDecided` 转发 approve / reject / request-revision。
+- 5 家模板：grok/muse/hermes/openclaw/codex，共用 `BaseAgentAdapter`，仅配置与校验不同；
+  不发起真实 provider 网络调用。
+
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| `system.subscribe` 未实现 | US-021 / 单列 | 客户端只能用现有 event 通知，不能显式订阅系统事件 |
+| `system.subscribe` 未实现 | 单列/US-021 | 客户端只能用现有 event 通知，不能显式订阅系统事件 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
 | SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
-| adapters/mock-agents/CLI/Web/Docker 为空 | US-015…US-019 | 生态与部署未落地 |
+| mock-agents/CLI/Web/Docker 为空 | US-016…US-019 | 生态与部署未落地 |
+
 ## 下一步
 
-1. **US-015…US-017**：adapters / CLI / 三智能体 demo（全部复用 SDK）。
-2. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
-3. **US-019…US-021**：Web（必须复用 SDK）；
-   `system.subscribe` 建议随 US-021 或单列。
+1. **US-016 CLI**：复用 SDK；配置/profile、history 游标、-32007/-32005 UX。
+2. **US-017 demo**：planner/coder/reviewer + `npm run demo`，覆盖 approve 与 reject→重做。
+3. **US-018 Docker**：数据目录 700、TLS 反代、密钥注入、迁移入口。
+4. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
 
 ## 溯源说明
 

@@ -21,6 +21,20 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-015 AgentAdapter（5 个决策）
+
+1. **能力声明**：构造时静态声明，`getCapabilities()` 暴露
+   `{skills, availability, maxConcurrentTasks, supportsReview}`。服务端评分当前仍使用
+   accounts/tasks 数据；adapter 声明用于自身竞标决策，未来若服务端消费需新增查询。
+2. **中止语义**：使用 `onAborted({taskId, reason})` 回调；reason =
+   `cancelled | reassigned | not_assignee`。不使用 AbortSignal（跨 WS 事件更直观）。
+3. **review 感知**：adapter 感知，`onReviewDecided` 转发 approve/reject/request-revision。
+4. **SDK 所有权**：外部注入 `AgentMeshClient`；adapter 不持有/复制传输逻辑。
+5. **模板完整度**：构造参数校验 + 能力声明 + 事件注册 + 错误透传；
+   五家模板仅配置/校验不同，不发真实网络请求，无 TODO 空壳。
+
+
+
 ## US-014 SDK（5 个决策）
 
 1. **`message.history.total` → `channelTotal`**：保留字段并改名，明确它是
