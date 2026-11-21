@@ -2,6 +2,25 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-014 TypeScript SDK
+
+测试基线：**444**（core 51 / protocol 47 / store 71 / sdk 7 / server 268）。
+
+- 新增 `@agentmesh/sdk`：`AgentMeshClient`，可注入 `TransportFactory`；
+  浏览器使用全局 WebSocket，Node 由调用方注入 `ws` 适配器，SDK 核心不 import `ws`。
+- 带内 JWT 认证：从 token 的 `sub` 调 `agent.authenticate {agentId, token}`，
+  浏览器无需 handshake header。
+- resume 始终携带 `lastSeenEpoch`；实时通知与 history 共用全局 `seq` 去重。
+- `gap_too_large`：`auto` 清空游标 + 自动重连 + 回调；`strict` 只回调，
+  由调用方 `resync()`；`resyncChannelHistory` 循环 history 并去重。
+- `sendRaw` 逃生舱（不保证类型、不参与去重）；错误映射 `-32001…-32007`，
+  `VersionConflictError` 暴露 taskId/expectedVersion/currentVersion。
+- 类型化方法覆盖 21 个已注册 RPC；`system.subscribe` 仍缺（21/22）。
+- 协议：补 `message.history` / `task.bid` / `task.award` params schema；
+  `message.history.total` 重命名为 `channelTotal`。
+- 测试：mock transport 覆盖 welcome/resume/去重/gap 两种模式/sendRaw/错误映射；
+  真实 server 集成测试覆盖注册→建频道→发消息→history 补偿。
+
 ## 2026-11-21 — US-013 审核 / 改派 / 取消
 
 测试基线：**437**（core 51 / protocol 47 / store 71 / server 268）。

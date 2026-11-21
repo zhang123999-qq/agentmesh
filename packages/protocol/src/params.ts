@@ -66,3 +66,28 @@ export const taskCancelParamsSchema = z.object({
   reason: z.string().max(MAX_PROGRESS_NOTE_LENGTH).optional(),
 });
 export type TaskCancelParams = z.infer<typeof taskCancelParamsSchema>;
+
+export const messageHistoryParamsSchema = z.object({
+  channelId: z.string().min(1),
+  beforeSeq: z.number().int().nonnegative().optional(),
+  afterSeq: z.number().int().nonnegative().optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export type MessageHistoryParams = z.infer<typeof messageHistoryParamsSchema>;
+
+export const taskBidParamsSchema = z.object({
+  taskId: z.string().min(1),
+  price: z.number().nonnegative(),
+  eta: z.number().nonnegative().optional(),
+  approach: z.string().max(2000).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+});
+export type TaskBidParams = z.infer<typeof taskBidParamsSchema>;
+
+export const taskAwardParamsSchema = z.object({
+  taskId: z.string().min(1),
+  expectedVersion: z.number().int().nonnegative(),
+  awardeeId: z.string().min(1).optional(),
+  strategy: z.enum(['manual', 'auto']).optional(),
+});
+export type TaskAwardParams = z.infer<typeof taskAwardParamsSchema>;

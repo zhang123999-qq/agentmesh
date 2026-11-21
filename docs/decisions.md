@@ -21,6 +21,21 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-014 SDK（5 个决策）
+
+1. **`message.history.total` → `channelTotal`**：保留字段并改名，明确它是
+   “查询时频道消息总数”，不是本页条数；分页仍靠 `hasMoreBefore/After` 与
+   `nextBefore/AfterSeq`。
+2. **`gap_too_large`**：默认 `auto` = 清空游标、自动重连并回调 `gapTooLarge`；
+   `strict` = 只回调，由调用方 `resync()`。两种模式都有测试。
+3. **`sendRaw`**：提供原样发送逃生舱，标注为不保证类型、不参与去重。
+4. **`system.subscribe` 归属**：本故事不实现，保持 21/22；建议随 US-021 或单列。
+5. **Transport**：可注入 `TransportFactory`；SDK 核心不 import `ws`，浏览器使用
+   全局 WebSocket，Node 由调用方注入 `ws` 适配器。浏览器 JWT 通过带内
+   `agent.authenticate { agentId: <sub>, token }` 完成，避免依赖 handshake header。
+
+
+
 ## US-013 审核 / 改派 / 取消（6 个决策）
 
 1. **review decision 映射**：`approve → done`、`reject → in_progress`、

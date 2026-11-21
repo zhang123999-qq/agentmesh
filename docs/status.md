@@ -11,10 +11,11 @@
 | US-011 | **完成（本地验证）** | progress/complete/fail、父子 DAG、失败传播、终态吸收 |
 | US-012 | **完成（本地验证）** | OR-Set 收敛/压缩、LWW presence、业务不变量 |
 | US-013 | **完成（本地验证）** | review/reassign/cancel；任务可闭环到 done/failed/cancelled |
-| US-014…US-021 | 未开始 | SDK、adapters、CLI、mock agents、Web、Docker |
+| US-014 | **完成（本地验证）** | `@agentmesh/sdk`：传输无关、resume/去重/gap 策略、21 个类型化方法 |
+| US-015…US-021 | 未开始 | adapters、CLI、mock agents、Web、Docker |
 
-测试基线：**437**
-（core 51 / protocol 47 / store 71 / server 268）。
+测试基线：**444**
+（core 51 / protocol 47 / store 71 / sdk 7 / server 268）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -107,7 +108,25 @@ US-013 的关键语义：
 
 未注册、请求返回 `-32601`：
 
-- `system.subscribe`（建议归 US-021 或单列系统事件订阅故事）
+- `system.subscribe`（单列/US-021；本故事不实现）
+
+US-014 的关键语义：
+
+- `@agentmesh/sdk` 提供 `AgentMeshClient`，**不内置 `ws`**；通过可注入
+  `TransportFactory` 支持浏览器与 Node（浏览器默认使用全局 WebSocket，Node 用
+  `ws` 适配器）。
+- 浏览器的 JWT 登录走**带内认证**：SDK 从 token 解出 `sub`，发送
+  `agent.authenticate {agentId, token}`；服务端验证后绑定 socket 并下发 welcome。
+- resume **始终携带 `lastSeenEpoch`**；实时通知与 history 共用全局 `seq` 去重。
+- `gap_too_large`：默认 `auto` = 清空游标 + 自动重连 + `gapTooLarge` 回调；
+  `strict` = 只回调、由调用方 `resync()`。`resyncChannelHistory()` 按
+  `message.history` 循环拉取并按 seq 去重。
+- `sendRaw` 提供原样发送逃生舱，**不保证类型、不参与去重**。
+- 类型化方法覆盖当前 21 个已注册 RPC；`system.subscribe` 仍为 22 个协议方法中
+  唯一未实现项。
+- `message.history` 的 `total` 已重命名为 **`channelTotal`**（频道消息总数，
+  不是本页条数）；`message.history` / `task.bid` / `task.award` 参数 schema 已补进
+  `packages/protocol/src/params.ts`。
 
 ## 已知缺口 / 技术债
 
@@ -118,15 +137,13 @@ US-013 的关键语义：
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
 | SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
-| SDK/adapters/mock-agents/CLI/Web/Docker 为空 | US-014…US-019 | 生态与部署未落地 |
-
+| adapters/mock-agents/CLI/Web/Docker 为空 | US-015…US-019 | 生态与部署未落地 |
 ## 下一步
 
-1. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
-   `message.history` / `task.bid` / `task.award` 的 zod schema 与 total 语义。
-2. **US-015…US-017**：adapters / CLI / 三智能体 demo。
-3. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
-4. **US-019…US-021**：Web（必须复用 SDK）；`system.subscribe` 建议随 US-021 或单列。
+1. **US-015…US-017**：adapters / CLI / 三智能体 demo（全部复用 SDK）。
+2. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
+3. **US-019…US-021**：Web（必须复用 SDK）；
+   `system.subscribe` 建议随 US-021 或单列。
 
 ## 溯源说明
 

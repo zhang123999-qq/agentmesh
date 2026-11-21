@@ -201,7 +201,7 @@ interface MessageResult {
 interface HistoryResult {
   channelId: string;
   messages: MessageResult['message'][];
-  total: number;
+  channelTotal: number;
   limit: number;
   nextBeforeSeq: number | null;
   nextAfterSeq: number | null;
@@ -807,7 +807,7 @@ describe('message.history', () => {
     expect(page).toMatchObject({
       channelId,
       messages: [],
-      total: 0,
+      channelTotal: 0,
       nextBeforeSeq: null,
       nextAfterSeq: null,
       hasMoreBefore: false,
@@ -836,7 +836,7 @@ describe('message.history', () => {
       sent[3]?.seq,
       sent[4]?.seq,
     ]);
-    expect(page.total).toBe(5);
+    expect(page.channelTotal).toBe(5);
     expect(page.limit).toBe(2);
     expect(page.nextBeforeSeq).toBe(sent[3]?.seq);
     expect(page.nextAfterSeq).toBe(sent[4]?.seq);

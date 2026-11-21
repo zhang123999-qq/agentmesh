@@ -192,7 +192,8 @@ export interface MessageHistoryResult {
   readonly channelId: string;
   /** Oldest-first page. Every message carries its global `seq`. */
   readonly messages: MessageView[];
-  readonly total: number;
+  /** Total messages in the channel at query time (not the page size). */
+  readonly channelTotal: number;
   readonly limit: number;
   readonly nextBeforeSeq: number | null;
   readonly nextAfterSeq: number | null;
@@ -730,7 +731,7 @@ export class ChannelsService {
     return {
       channelId: channel.id,
       messages: page.map(toMessageView),
-      total: this.#messages.count(channel.id, channel.workspaceId),
+      channelTotal: this.#messages.count(channel.id, channel.workspaceId),
       limit,
       nextBeforeSeq: first?.seq ?? null,
       nextAfterSeq: last?.seq ?? null,

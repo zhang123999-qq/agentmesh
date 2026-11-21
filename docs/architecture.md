@@ -113,6 +113,17 @@ docs                本目录
 - 收敛性测试覆盖：不同 add/remove 顺序、乱序 merge、重复 merge 幂等、
   压缩前后 live 集合一致、LWW 并发同键收敛。
 
+## SDK（US-014）
+
+- `packages/sdk` 提供 `AgentMeshClient`；不依赖 Node-only 模块，通过
+  `TransportFactory` 注入浏览器 `WebSocket` 或 Node `ws`。
+- 传输语义：welcome 版本校验、带内 token 认证、resume 始终带 `lastSeenEpoch`、
+  全局 `seq` 去重、`gap_too_large` 自动/严格两模式、`resyncChannelHistory`。
+- 类型：参数尽量来自 `@agentmesh/protocol/params.ts`；响应视图在 SDK 内定义
+  （协议暂无响应 schema）。
+- 覆盖 21 个已注册 RPC；`system.subscribe` 仍是唯一未实现协议方法。
+- Web（US-019）与 CLI（US-016）必须复用该传输层，不得自建第二套续传。
+
 ## 测试金字塔
 
 - 单元：协议 schema、DAO/迁移、reducer、评分策略（未来）。
