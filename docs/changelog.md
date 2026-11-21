@@ -2,6 +2,19 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-016 agentmesh CLI
+
+测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。
+
+- 新增 `@agentmesh/cli`：单 binary `agentmesh`，子命令覆盖账号、频道、消息、任务全生命周期、实时 `task watch` 与 `doctor` 自检。
+- 复用 `@agentmesh/sdk`（Node transport 适配器为 CLI 仅有的 `ws` import）；不复制重连/去重/epoch 语义。
+- 配置：`flags > env > profile > default`；`AGENTMESH_HOME` 默认 `~/.agentmesh`，目录 0700、文件 0600；account secret 永不落盘。
+- `-32007`：所有 CAS 命令必填 `--expected-version`，冲突时打印 `taskId / expected / current` 与建议命令，**不自动重试**。
+- `task watch`：SDK `on()` 实时打印任务相关通知（按 `taskId`/`parentTaskId` 过滤）。
+- `doctor`：配置 URL → token 存在与 `exp` → welcome/协议版本 → 只读 `channel.list`。
+- 测试：单元（config/errors/watch）+ 集成（真实 server 端到端：login、channel+history 分页、竞标→授标→进度→完成→审核、-32007、doctor 过期 token）。
+- `npm run verify` 全绿，`npm audit --audit-level=high` 与 `--omit=dev` 均为 0。
+
 ## 2026-11-21 — system.subscribe 归属与语义决策
 
 - 归属：单列 **US-020**，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`。

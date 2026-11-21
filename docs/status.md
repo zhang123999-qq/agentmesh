@@ -15,7 +15,8 @@
 | US-015 | **完成（本地验证）** | `@agentmesh/adapters`：AgentAdapter + 5 家模板、中止/review 契约 |
 | US-017 | **完成（本地验证）** | `npm run demo`：三智能体完整链路、rework、cancel、-32007 |
 | US-018 | **完成（本地等价验证）** | Docker/Caddy、migrate/backup CLI、health/关闭脚本 |
-| US-016 / US-019…US-021 | 未开始 | CLI、Web |
+| US-016 | **完成（本地验证）** | `agentmesh` CLI：register/login/whoami、channel、message、task 全生命周期、watch、doctor；复用 SDK |
+| US-019…US-021 | 未开始 | Web |
 
 测试基线：**502**
 （core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270）。
