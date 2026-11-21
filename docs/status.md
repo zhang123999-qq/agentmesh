@@ -111,7 +111,7 @@ US-013 的关键语义：
 
 未注册、请求返回 `-32601`：
 
-- `system.subscribe`（单列/US-021；本故事不实现）
+- `system.subscribe`（已定：US-020 实现，admin opt-in domain-only 事件；实现前保持 21/22）
 
 US-014 的关键语义：
 
@@ -175,7 +175,7 @@ US-018 的关键语义：
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| `system.subscribe` 未实现 | 单列/US-021 | 客户端只能用现有 event 通知，不能显式订阅系统事件 |
+| `system.subscribe` 未实现 | **US-020**（归属已定：单列；见 decisions.md） | 客户端只能用现有 event 通知；domain-only 事件仅 admin 显式订阅后可见 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
@@ -185,8 +185,9 @@ US-018 的关键语义：
 ## 下一步
 
 1. **US-016 CLI**：复用 SDK；配置/profile、history 游标、-32007/-32005 UX。
-2. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
-3. **M9 compose 验证**：在具备 Docker 的环境执行 `docker compose up`，确认 `/health` 200
+2. **US-020 `system.subscribe`**（归属与语义已定，见 decisions.md），完成后 RPC 22/22。
+3. **US-019…US-021 Web**（必须复用 SDK；默认只用 `on()`）。
+4. **M9 compose 验证**：在具备 Docker 的环境执行 `docker compose up`，确认 `/health` 200
    与 SIGTERM 优雅关闭后，再把 M9 标记为完全达成。
 
 ## 溯源说明

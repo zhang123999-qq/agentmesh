@@ -21,6 +21,48 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## system.subscribe 归属与语义（US-019 前置决策）
+
+**结论：单列 US-020，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`，
+只有审计视图才用 `subscribeSystem`。**
+
+1. **归属**：单列 **US-020**。Web 不被协议变更拖住，22/22 的翻转有独立里程碑与
+   独立提交，决策与实现分离，失败可单独回滚。
+   被否决：并入 US-019（协议 + UI 同一提交，无法单独验证 22/22）；
+   不实现（22/22 永远缺一项，SDK 类型面不完整）。
+2. **语义**：**增量订阅，不是替代**。现有 notification 继续广播给 workspace 内所有
+   已认证 socket；`system.subscribe` 只**追加**当前 socket 的订阅：可选
+   `includeDomainEvents`（默认 `false`）与 `types` 过滤。`on(type)` 仍是 SDK 一等
+   入口；`subscribeSystem(opts)` 只是薄封装（发 RPC + 复用同一本地分发）。
+   被否决：替代式订阅（会把现有广播降级为“订阅者才收”，破坏 US-017 demo 与
+   Web 实时性）；另造一套通知信封（与 `eventPayloadSchemas` 重复）。
+3. **范围**：默认**不含** domain-only 事件。`includeDomainEvents: true` 需 admin；
+   理由：`task.bid.placed`、`message.created` 等是投影输入，含内部字段（如
+   approach 文本），默认外发会扩大泄露面。`types` 过滤只作用于追加的 domain 流，
+   notification 广播不受它影响。
+4. **权限**：admin-only。矩阵：
+
+   | 调用者 | `system.subscribe` | `includeDomainEvents` |
+   | --- | --- | --- |
+   | 未认证 | `-32001` | — |
+   | agent | `-32002` | — |
+   | admin | 允许 | 允许（显式 true/false） |
+
+   与现有 workspace 广播的关系：广播不变；订阅只增不减，且仅影响发起订阅的 socket。
+5. **断线与补偿**：**走全局 seq + resume**，不新增游标。订阅状态是连接级；
+   SDK 重连时先发 `system.subscribe` 再发 `resume`，服务端对已订阅 socket 的 replay
+   也包含 domain 事件（按其 `types` 过滤）；去重键与 `on()` 共用 `seq` 与
+   `WsSession.markSent`，live push 与 replay 不会重复。未重新订阅的新连接不会收到
+   domain 事件，也不做“半程补偿”。
+6. **不改变现有通知行为**：`publishEvent` 的 workspace 广播与
+   `publishEventToAgents` 的频道扇出保持原样；`system.subscribe` 不引入“取消订阅”
+   状态，不修改 `isNotificationEventType` 的默认判定。US-017 demo 与 US-019 Web 的
+   实时路径因此不受影响。
+
+实现约束留给 US-020（不在本决策内开工）：协议参数 schema、dispatcher handler、
+gateway 的 per-session 订阅标记、resume 的 domain replay、SDK `subscribeSystem`；
+若新增 notification 类型，按 US-021A 基准补 registry 样本与契约测试。
+
 ## Protocol optional vs nullable 基准（US-021A）
 
 1. **通知 payload**：可选字段由发射端**省略**；schema 使用

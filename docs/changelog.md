@@ -2,6 +2,15 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — system.subscribe 归属与语义决策
+
+- 归属：单列 **US-020**，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`。
+- 语义：**增量订阅**，不替代、不降级现有 notification 广播。
+- 范围/权限：admin-only；`includeDomainEvents` 默认 `false`，domain-only 事件默认
+  不外发；`types` 过滤只作用于追加的 domain 流。
+- 断线：走全局 seq + resume；订阅为连接级，SDK 重连先 `subscribeSystem` 再 `resume`。
+- RPC 计数保持 **21/22**，US-020 实现后翻转 22/22。无代码改动。
+
 ## 2026-11-21 — US-021A optional/nullable 审查
 
 测试基线：**502**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270）。
