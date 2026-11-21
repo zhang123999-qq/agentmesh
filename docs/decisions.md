@@ -230,6 +230,52 @@ CAS（version +1）；后续 progress 只原地更新 `tasks.progress`，不碰 
 - 不做数据库静态加密。
 
 
+
+## Audit 基线破口修复（US-019 引入的 postcss 漏洞）
+
+**背景**：US-019 引入 Next.js 15 后，`npm audit --omit=dev --audit-level=high` 出现 2 个漏洞
+（来自 Next.js 传递依赖的 postcss <=8.5.22）。之前基线是 --omit=dev 为 0，
+这是"可交付 MVP"的新阻断项。
+
+**漏洞详情**：
+- 包：postcss（Next.js 的传递依赖）
+- 版本：<=8.5.22（Next.js 15.5.29 依赖 postcss 8.5.22）
+- CVE：GHSA-qx2v-qp2m-jg93 / GHSA-6g55-p6wh-862q / GHSA-fxqj-rqcc-2cmp / GHSA-r28c-9q8g-f849
+- 严重度：1 high + 1 moderate
+- 修复版本：postcss >=8.5.23（已发布）
+
+**可达性分析**：
+- PostCSS 在 Next.js **构建时**运行（CSS 处理、source map 生成），
+  不在运行时容器/浏览器代码路径上。
+- 攻击面：CI 构建机器或开发者本地构建时处理恶意 CSS/source map。
+- 容器运行时不包含 postcss（已在 node_modules 中但仅构建时用）。
+- 结论：不可达生产运行时，但构建环境有风险，CI/CD 需修复。
+
+**4 个决策**：
+
+1. **修复路径**：**使用 npm overrides 强制 postcss >=8.5.23**。
+   理由：最小改动、不升级 Next.js 主版本、不破坏构建、移除条件明确（Next.js 16 发布后移除）。
+   被否决：升级 Next.js 16（破坏性变更未知，需完整回归）；
+   接受并记录（破坏基线原则，不可接受）。
+
+2. **Web 纳入 verify 门槛**：**是**。
+   `npm run verify` 扩展为覆盖 Web 的构建 + audit（omit=dev）。
+   现有 `verify` 脚本：`typecheck && lint && test`；
+   新增：Web 的 `build` + `audit --omit=dev`。
+   这能在 CI 阶段捕获后续 Web 依赖引入的漏洞。
+
+3. **不接受"记录风险"方案**：必须修复恢复 0 漏洞。
+   不得把 --audit-level=high 的门槛放宽；不得把漏洞写入"已知风险"清单而不修。
+
+4. **devDependencies audit 门槛**：**暂不收口**。
+   当前只要求 `--omit=dev` 为 0；devDependencies 允许已知漏洞（构建工具链常见）。
+   未来若 CI 构建环境要求全 0，再单独列故事收口。
+
+**实现**：
+- 根 `package.json` 添加 `overrides: { postcss: "8.5.33" }`（当前最新修复版）。
+- 根 `package.json` 的 `verify` 脚本扩展 Web 构建 + audit。
+- `overrides` 处加注释说明原因与移除条件（Next.js 16 发布后移除）。
+
 ## US-019 Next.js 管理后台（7 个决策）
 
 1. **登录角色**：**admin-only 进入后台**；agent 走 CLI/SDK，不提供 Web 只读视图。

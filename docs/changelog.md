@@ -19,6 +19,32 @@
 - 验证：Next.js 15 生产构建通过；`npm run verify` 全绿（typecheck + lint + test + demo + audit）。
 - 已知：`npm audit --omit=dev` 发现 Next.js 15 依赖的 postcss 2 个漏洞（待 Next.js 16 修复），不阻塞 MVP。
 
+## 2026-11-21 — Audit 基线破口修复（US-019 引入的 postcss 漏洞）
+
+- **背景**：US-019 引入 Next.js 15 后，`npm audit --omit=dev --audit-level=high` 出现 2 个漏洞
+  （来自 Next.js 传递依赖的 postcss <=8.5.22，GHSA-qx2v-qp2m-jg93 等 4 个 CVE，
+  1 high + 1 moderate）。之前基线是 --omit=dev 为 0，这是"可交付 MVP"的新阻断项。
+
+- **可达性分析**：PostCSS 在 Next.js **构建时**运行（CSS 处理、source map 生成），
+  不在运行时容器/浏览器代码路径上。攻击面仅限 CI 构建机器或本地构建时。
+  容器运行时不包含 postcss。结论：不可达生产运行时，但构建环境需修复。
+
+- **4 个决策**：
+  1. 修复路径：使用 npm overrides 强制 postcss >=8.5.33（当前最新修复版）。
+     被否决：升级 Next.js 16（破坏性变更未知）；接受并记录（破坏基线原则不可接受）。
+  2. Web 纳入 verify 门槛：是。`verify` 脚本扩展为 `build -w @agentmesh/web && audit --omit=dev -w @agentmesh/web`。
+  3. 不接受"记录风险"方案：必须修复恢复 0 漏洞。
+  4. devDependencies audit 门槛：暂不收口。
+
+- **实现**：
+  - 根 `package.json` + `apps/web/package.json` 添加 `overrides: { postcss: "8.5.33" }`。
+  - 根 `verify` 脚本扩展：`npm run build -w @agentmesh/web && npm run audit --omit=dev -w @agentmesh/web`。
+  - Web `package.json` 新增 `audit` 脚本：`npm audit --omit=dev --audit-level=high`。
+  - `overrides` 处加注释说明原因与移除条件（Next.js 16 发布后移除）。
+
+- **验证**：`npm audit --omit=dev --audit-level=high` 恢复为 **0 vulnerabilities**；
+  `npm run verify` 全绿（含 Web 构建 + audit）；`npm run demo` 退出码 0。
+
 ## 2026-11-21 — US-020 system.subscribe
 
 - 归属：单列 **US-020**，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`。
