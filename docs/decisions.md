@@ -21,6 +21,30 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-016 agentmesh CLI（5 个决策）
+
+1. **binary 组织**：单个 `agentmesh` binary + 多子命令（register/login/channel/
+   message/task/doctor/watch）。`migrate` / `backup` / `seed:admin` **保留**在
+   `@agentmesh/server`，不并入 `agentmesh admin ...`。理由：它们直连 SQLite
+   （`better-sqlite3` 原生依赖），而 CLI 会装在各 agent 机器上，只应依赖
+   SDK + `ws`；合并会把原生模块和部署版本耦合进客户端。
+2. **watch**：支持 `agentmesh task watch <taskId>`，用 SDK `on()` 打印该任务的
+   通知事件；Ctrl+C 退出，不自动判定终态（状态语义只属于服务端）。用可注入
+   watch client 的单元测试断言打印内容。
+3. **配置优先级**：`--flag` > 环境变量（`AGENTMESH_URL` / `AGENTMESH_PROFILE` /
+   `AGENTMESH_HOME`）> profile 文件 > 默认文件。位置：默认
+   `$AGENTMESH_HOME/config.json`，profile 为 `$AGENTMESH_HOME/profiles/<name>.json`，
+   `AGENTMESH_HOME` 默认 `~/.agentmesh`；目录 0700、文件 0600（Windows 尽力而为）。
+   **account secret 不写配置、不读环境变量**：`login` 用它换 token 后立即丢弃。
+   token 可存 profile 文件（0600）或由 `--token` 显式传入。
+4. **-32007 UX**：CAS 命令（award/complete/fail/review/reassign/cancel）**必须**
+   显式传 `--expected-version`；不自动重试、不读后写。冲突时打印
+   `taskId / expected / current` 与建议命令（先 `task get` 再用 current 重试），
+   退出码 1。
+5. **doctor**：提供 `agentmesh doctor`：解析配置、检查 token 存在与 `exp`、
+   连接并等待 welcome（协议版本由 SDK 校验）、发一次只读 RPC（`channel.list`）。
+   任一失败退出码 1，全部通过打印 PASS；测试覆盖成功、过期 token、不可达 URL。
+
 ## system.subscribe 归属与语义（US-019 前置决策）
 
 **结论：单列 US-020，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`，

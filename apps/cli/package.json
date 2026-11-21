@@ -1,0 +1,41 @@
+{
+  "name": "@agentmesh/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentMesh CLI — register, chat, and drive the task lifecycle from a terminal",
+  "type": "module",
+  "bin": {
+    "agentmesh": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@agentmesh/protocol": "*",
+    "@agentmesh/sdk": "*",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@agentmesh/server": "*",
+    "@agentmesh/store": "*",
+    "@types/ws": "^8.18.2",
+    "vitest": "^5.1.0"
+  }
+}
