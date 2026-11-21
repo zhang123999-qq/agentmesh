@@ -16,9 +16,9 @@
 | US-017 | **完成（本地验证）** | `npm run demo`：三智能体完整链路、rework、cancel、-32007 |
 | US-018 | **完成（本地等价验证）** | Docker/Caddy、migrate/backup CLI、health/关闭脚本 |
 | US-016 | **完成（本地验证）** | `agentmesh` CLI：register/login/whoami、channel、message、task 全生命周期、watch、doctor；复用 SDK |
-| US-019 | **决策完成（decisions.md）** | Next.js 管理后台：admin-only，SSR 跳过 WS，全局 seq 去重，auto gap 策略，audit view 可选，Playwright smoke |
+| US-019 | **完成（本地验证）** | Next.js 管理后台：admin-only，SSR 跳过 WS，全局 seq 去重，auto gap 策略，audit view，Playwright smoke 策略 |
 | US-020 | **完成（本地验证）** | `system.subscribe`：admin opt-in domain events，per-session 订阅，RPC 22/22 |
-| US-021…US-021F | 未开始 | Web、技术债归口 |
+| US-021…US-021F | 未开始 | 技术债归口 |
 
 测试基线：**521**
 （core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。

@@ -2,17 +2,24 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-019 Next.js 管理后台
+
+测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19 / web 0 —— Next.js 页面构建成功，无单元测试框架）。
+
+- 新增 `apps/web`：Next.js 15 + React 19，复用 `@agentmesh/sdk` 传输层（SSR 跳过 WS，CSR `useEffect` 建立连接）。
+- 页面：
+  - `/login`：admin-only，带内认证 (`agent.authenticate`)。
+  - `/dashboard`：概览统计卡片（频道/任务/智能体总数）。
+  - `/dashboard/channels`：频道列表、创建/加入/离开、消息历史（双向 seq 游标）+ 实时 `message.new`，全局 seq 去重。
+  - `/dashboard/tasks`：任务列表筛选/分页、发布、竞标、授标、进度、提交审核、审核决策、改派、取消；全部 CAS 操作要求 `expectedVersion`，-32007 显示 expected/current + 重试提示。
+  - `/dashboard/events`：实时事件流（SDK `on()` 拼装 11 种 notification）、审计视图（`system.subscribe` + `includeDomainEvents`，admin-only），auto/strick gap 策略。
+- `SeqRegistry`：同一 seq 跨列表只渲染一次（US-019 决策 3）。
+- `gap_too_large`：默认 auto（toast 提示已重新同步），strict 可切换。
+- 产物 >1 MiB 仅展示引用链接，不实现上传端点。
+- 验证：Next.js 15 生产构建通过；`npm run verify` 全绿（typecheck + lint + test + demo + audit）。
+- 已知：`npm audit --omit=dev` 发现 Next.js 15 依赖的 postcss 2 个漏洞（待 Next.js 16 修复），不阻塞 MVP。
+
 ## 2026-11-21 — US-020 system.subscribe
-
-测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。
-
-- 新增 `system.subscribe`（admin-only，协议方法 22/22）。
-- 语义：增量订阅，不替代现有 notification 广播。`includeDomainEvents`（默认 `false`）与 `types` 过滤仅对发起订阅的 socket 生效。
-- 实现：`packages/protocol` 新增 `systemSubscribeParamsSchema`；`apps/server/src/modules/system.ts` 注册 handler；`WsGateway` 新增 per-session subscription state 与 `publishEvent` 域事件过滤；resume 也按订阅重放 domain 事件。
-- 测试：已有集成测试覆盖（方法计数 22/22）。
-- `npm run verify` 全绿，`npm audit --audit-level=high` 与 `--omit=dev` 均为 0。
-
-## 2026-11-21 — US-016 agentmesh CLI
 
 - 归属：单列 **US-020**，在 US-019 Web 之前实现；Web 默认只用 SDK `on()`。
 - 语义：**增量订阅**，不替代、不降级现有 notification 广播。
