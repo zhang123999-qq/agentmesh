@@ -247,6 +247,14 @@ describe('task.bid', () => {
       'task.bid.received',
     ]);
     expect(log.every((event) => event.version === 1)).toBe(true);
+    expect(log.find((event) => event.type === 'task.bid.received')?.payload).toMatchObject({
+      taskId: task.id,
+      agentId: worker.agentId,
+      price: 100,
+      eta: 60,
+      approach: 'plan',
+      confidence: 0.8,
+    });
   });
 
   it('overwrites the same agent bid instead of creating a second live row', async () => {
@@ -266,6 +274,14 @@ describe('task.bid', () => {
     expect(second.bid.price).toBe(80);
     expect(h.repos.taskBids.listByTask(task.id)).toHaveLength(1);
     expect(h.taskLog(task.id).filter((event) => event.type === 'task.bid.placed')).toHaveLength(2);
+    // Null optionals must be omitted: the protocol schema uses `.optional()`,
+    // not `.nullable()`, so `null` would make the SDK drop the notification.
+    const received = h.taskLog(task.id)
+      .filter((event) => event.type === 'task.bid.received')
+      .at(-1);
+    expect(received?.payload).not.toHaveProperty('eta');
+    expect(received?.payload).not.toHaveProperty('approach');
+    expect(received?.payload).not.toHaveProperty('confidence');
     // Bidding never mutates the task row version.
     expect(h.repos.tasks.get(task.id)?.version).toBe(1);
   });

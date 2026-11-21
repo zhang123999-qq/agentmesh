@@ -1016,9 +1016,9 @@ export class TasksService {
         bidId: bid.id,
         agentId: bid.agentId,
         price: bid.price,
-        eta: bid.eta,
-        approach: bid.approach,
-        confidence: bid.confidence,
+        ...(bid.eta === null ? {} : { eta: bid.eta }),
+        ...(bid.approach === null ? {} : { approach: bid.approach }),
+        ...(bid.confidence === null ? {} : { confidence: bid.confidence }),
         createdAt: bid.createdAt,
       };
       const aggregateId = aggregateIdOf('task', current.id);
