@@ -108,6 +108,18 @@ function eventFrame(seq: number, type = 'task.awarded'): Record<string, unknown>
   };
 }
 
+function notificationFrame(
+  seq: number,
+  type: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    jsonrpc: '2.0',
+    method: type,
+    params: { seq, aggregateId: 'task:tsk_1', type, version: 1, payload, ts: 1 },
+  };
+}
+
 describe('AgentMeshClient transport', () => {
   it('connects, processes welcome and dispatches typed events', async () => {
     const factory = new MockFactory();
@@ -294,6 +306,38 @@ describe('AgentMeshClient transport', () => {
     await delay(30);
     expect(factory.transports).toHaveLength(1);
     expect(client.state).toBe('gapTooLarge');
+    client.close();
+  });
+
+  it('dispatches notifications whose optional fields are omitted', async () => {
+    const factory = new MockFactory();
+    const client = new AgentMeshClient({
+      url: 'ws://mock',
+      transportFactory: factory.factory,
+      autoReconnect: false,
+    });
+    const seen: string[] = [];
+    client.on('task.progress.updated', (payload) => seen.push(`progress:${payload.progress}`));
+    client.on('task.completed', (payload) => seen.push(`completed:${payload.taskId}`));
+    client.on('task.cancelled', (payload) => seen.push(`cancelled:${payload.taskId}`));
+
+    const connecting = client.connect();
+    const transport = factory.last;
+    transport.open();
+    welcome(transport);
+    await connecting;
+
+    transport.emit(
+      notificationFrame(21, 'task.progress.updated', {
+        taskId: 'tsk_1',
+        agentId: 'agt_1',
+        progress: 50,
+      }),
+    );
+    transport.emit(notificationFrame(22, 'task.completed', { taskId: 'tsk_1' }));
+    transport.emit(notificationFrame(23, 'task.cancelled', { taskId: 'tsk_1' }));
+
+    expect(seen).toEqual(['progress:50', 'completed:tsk_1', 'cancelled:tsk_1']);
     client.close();
   });
 

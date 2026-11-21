@@ -21,6 +21,18 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## Protocol optional vs nullable 基准（US-021A）
+
+1. **通知 payload**：可选字段由发射端**省略**；schema 使用
+   `.nullable().optional()`，因此“省略 / 有值 / 显式 null”三种历史形态都能解析。
+2. **请求 params**：保持各自语义；只有确实需要 null 的字段才允许显式 null。
+3. **历史兼容**：不迁移旧事件；reducer 继续宽容读取；SDK 不再因 null optional
+   丢弃通知。
+4. **契约测试**：registry 驱动，覆盖 `eventPayloadSchemas` 的每个 notification；
+   新增 notification 未加样本会直接测试失败。
+
+
+
 ## US-018 Docker 部署（5 个决策）
 
 1. **迁移入口**：双通道——服务启动自动迁移（现状，`openStore`）+ 独立

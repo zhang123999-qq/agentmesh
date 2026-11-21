@@ -237,6 +237,41 @@ describe('taskReducer', () => {
     expect(state.assignee).toBe('agt_1');
   });
 
+  it('replays a legacy bid event with explicit null optional fields', () => {
+    const state = reduceTask(AGG, [
+      makeEvent({
+        seq: 1,
+        version: 1,
+        type: 'task.published',
+        aggregateId: AGG,
+        payload: { title: 'legacy' },
+      }),
+      makeEvent({
+        seq: 2,
+        version: 2,
+        type: 'task.bid.received',
+        aggregateId: AGG,
+        payload: {
+          taskId: 'tsk_1',
+          bidId: 'bid_legacy',
+          agentId: 'agt_1',
+          price: 10,
+          eta: null,
+          approach: null,
+          confidence: null,
+        },
+      }),
+    ]);
+    expect(state.bids['bid_legacy']).toMatchObject({
+      bidId: 'bid_legacy',
+      agentId: 'agt_1',
+      price: 10,
+      eta: null,
+      approach: null,
+      confidence: null,
+    });
+  });
+
   it('records failures, reassignments and blocked dependencies', () => {
     const events = lifecycle([
       { type: 'task.published', payload: { title: 'x' } },

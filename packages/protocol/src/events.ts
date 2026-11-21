@@ -96,13 +96,21 @@ export function isNotificationEventType(type: string): type is NotificationEvent
 // Event payloads
 // ---------------------------------------------------------------------------
 
+/**
+ * Optional notification fields are omitted by producers; `null` is accepted
+ * for backward compatibility with historical rows (US-021A). Request params
+ * keep their own nullability semantics.
+ */
+const optional = <T extends z.ZodTypeAny>(schema: T) =>
+  schema.nullable().optional();
+
 /** Per-agent presence change (LWW-Register in the CRDT layer, US-012). */
 export const presenceUpdatePayloadSchema = z.object({
   agentId: z.string().min(1),
   status: z.enum(['online', 'offline', 'away']),
   /** Set when presence is scoped to one channel. */
-  channelId: z.string().optional(),
-  at: z.number().int().nonnegative().optional(),
+  channelId: optional(z.string().min(1)),
+  at: optional(z.number().int().nonnegative()),
 });
 export type PresenceUpdatePayload = z.infer<typeof presenceUpdatePayloadSchema>;
 
@@ -113,8 +121,8 @@ export const messageNewPayloadSchema = z.object({
   content: z.string(),
   createdAt: z.number().int().nonnegative(),
   /** Mirrors the envelope `seq` so history pages and live stream share one cursor. */
-  seq: seqSchema.optional(),
-  replyToMessageId: z.string().optional(),
+  seq: optional(seqSchema),
+  replyToMessageId: optional(z.string().min(1)),
 });
 export type MessageNewPayload = z.infer<typeof messageNewPayloadSchema>;
 
@@ -124,10 +132,10 @@ export const taskBidReceivedPayloadSchema = z.object({
   agentId: z.string().min(1),
   price: z.number().nonnegative(),
   /** Estimated duration, in minutes. */
-  eta: z.number().nonnegative().optional(),
-  approach: z.string().optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  createdAt: z.number().int().nonnegative().optional(),
+  eta: optional(z.number().nonnegative()),
+  approach: optional(z.string()),
+  confidence: optional(z.number().min(0).max(1)),
+  createdAt: optional(z.number().int().nonnegative()),
 });
 export type TaskBidReceivedPayload = z.infer<typeof taskBidReceivedPayloadSchema>;
 
@@ -142,9 +150,9 @@ export const taskAwardedPayloadSchema = z.object({
    */
   exploration: z.boolean().default(false),
   /** How the awardee was chosen. */
-  strategy: z.enum(['manual', 'auto']).optional(),
+  strategy: optional(z.enum(['manual', 'auto'])),
   /** Task version after the CAS update (see -32007 version conflicts). */
-  version: z.number().int().nonnegative().optional(),
+  version: optional(z.number().int().nonnegative()),
 });
 export type TaskAwardedPayload = z.infer<typeof taskAwardedPayloadSchema>;
 
@@ -153,9 +161,9 @@ export const taskProgressUpdatedPayloadSchema = z.object({
   agentId: z.string().min(1),
   /** Completion percentage, 0-100. */
   progress: z.number().min(0).max(100),
-  note: z.string().optional(),
-  artifacts: z.array(z.string()).optional(),
-  at: z.number().int().nonnegative().optional(),
+  note: optional(z.string()),
+  artifacts: optional(z.array(z.string())),
+  at: optional(z.number().int().nonnegative()),
 });
 export type TaskProgressUpdatedPayload = z.infer<typeof taskProgressUpdatedPayloadSchema>;
 
@@ -163,16 +171,16 @@ export type TaskProgressUpdatedPayload = z.infer<typeof taskProgressUpdatedPaylo
 export const taskCompletedPayloadSchema = z.object({
   taskId: z.string().min(1),
   /** Artifact references (URLs/IDs); large content goes through HTTP upload. */
-  artifacts: z.array(z.string()).optional(),
-  note: z.string().optional(),
-  at: z.number().int().nonnegative().optional(),
+  artifacts: optional(z.array(z.string())),
+  note: optional(z.string()),
+  at: optional(z.number().int().nonnegative()),
 });
 export type TaskCompletedPayload = z.infer<typeof taskCompletedPayloadSchema>;
 
 export const taskFailedPayloadSchema = z.object({
   taskId: z.string().min(1),
-  reason: z.string().optional(),
-  at: z.number().int().nonnegative().optional(),
+  reason: optional(z.string()),
+  at: optional(z.number().int().nonnegative()),
 });
 export type TaskFailedPayload = z.infer<typeof taskFailedPayloadSchema>;
 
@@ -184,29 +192,29 @@ export const taskReviewDecidedPayloadSchema = z.object({
   taskId: z.string().min(1),
   reviewerId: z.string().min(1),
   decision: taskReviewDecisionSchema,
-  comment: z.string().optional(),
-  version: z.number().int().nonnegative().optional(),
+  comment: optional(z.string()),
+  version: optional(z.number().int().nonnegative()),
 });
 export type TaskReviewDecidedPayload = z.infer<typeof taskReviewDecidedPayloadSchema>;
 
 export const taskReassignedPayloadSchema = z.object({
   taskId: z.string().min(1),
   /** Previous assignee, absent when the task had none. */
-  fromAgentId: z.string().optional(),
+  fromAgentId: optional(z.string().min(1)),
   toAgentId: z.string().min(1),
   reassignedBy: z.string().min(1),
   /** True when the admin took the task over manually. */
-  humanTakeover: z.boolean().optional(),
-  reason: z.string().optional(),
-  version: z.number().int().nonnegative().optional(),
+  humanTakeover: optional(z.boolean()),
+  reason: optional(z.string()),
+  version: optional(z.number().int().nonnegative()),
 });
 export type TaskReassignedPayload = z.infer<typeof taskReassignedPayloadSchema>;
 
 export const taskCancelledPayloadSchema = z.object({
   taskId: z.string().min(1),
-  cancelledBy: z.string().optional(),
-  reason: z.string().optional(),
-  at: z.number().int().nonnegative().optional(),
+  cancelledBy: optional(z.string().min(1)),
+  reason: optional(z.string()),
+  at: optional(z.number().int().nonnegative()),
 });
 export type TaskCancelledPayload = z.infer<typeof taskCancelledPayloadSchema>;
 
@@ -215,18 +223,18 @@ export const taskDependencyFailedPayloadSchema = z.object({
   subtaskId: z.string().min(1),
   /** IDs of subtasks that are blocking the parent (writes `task.blockedBy`). */
   blockedBy: z.array(z.string().min(1)).min(1),
-  reason: z.string().optional(),
+  reason: optional(z.string()),
 });
 export type TaskDependencyFailedPayload = z.infer<typeof taskDependencyFailedPayloadSchema>;
 
 export const systemErrorPayloadSchema = z.object({
   message: z.string().min(1),
-  code: z.number().int().optional(),
+  code: optional(z.number().int()),
   /** Correlates the notification with the dispatcher log line. */
-  reqId: z.string().optional(),
-  method: z.string().optional(),
-  agentId: z.string().optional(),
-  detail: z.unknown().optional(),
+  reqId: optional(z.string()),
+  method: optional(z.string()),
+  agentId: optional(z.string()),
+  detail: optional(z.unknown()),
 });
 export type SystemErrorPayload = z.infer<typeof systemErrorPayloadSchema>;
 

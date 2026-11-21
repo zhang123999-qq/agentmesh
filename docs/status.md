@@ -17,8 +17,8 @@
 | US-018 | **完成（本地等价验证）** | Docker/Caddy、migrate/backup CLI、health/关闭脚本 |
 | US-016 / US-019…US-021 | 未开始 | CLI、Web |
 
-测试基线：**454**
-（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 270）。
+测试基线：**502**
+（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 

@@ -2,6 +2,20 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-021A optional/nullable 审查
+
+测试基线：**502**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270）。
+
+- 审查 `packages/protocol` 全部 notification payload：12 种类型、33 个可选字段。
+- 通知 schema 的可选字段改为 `nullable().optional()`：发射端继续**省略** null，
+  但历史事件里的显式 null 仍可解析/重放，不再被 SDK 静默丢弃。
+- 新增 registry 驱动的契约测试：每个 notification 必须有样本；每个可选字段断言
+  “省略 / 有值 / 显式 null”三种形态。
+- 新增 SDK 测试：`task.progress.updated` / `task.completed` / `task.cancelled`
+  省略可选字段时仍能触发 `on()`。
+- 新增 core replay 测试：旧 `task.bid.*` 事件含显式 null 仍可重放。
+- `npm run demo` 回归通过。
+
 ## 2026-11-21 — US-018 Docker / 部署
 
 测试基线：**454**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 270）。

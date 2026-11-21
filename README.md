@@ -58,7 +58,7 @@ npm install                 # 根目录安装，workspaces 自动联动
 npm run build               # 全包构建（--workspaces --if-present）
 npm run typecheck           # 全包类型检查
 npm run lint                # 全包 ESLint
-npm test                    # 全包单元测试（vitest，当前 454 个）
+npm test                    # 全包单元测试（vitest，当前 502 个）
 npm run demo                # 起真实服务端 + 三 mock agent 的端到端演示
 npm run verify:docker       # 无 Docker 引擎时的本地部署等价验证
 npm run verify              # typecheck + lint + test（提交前统一校验）
