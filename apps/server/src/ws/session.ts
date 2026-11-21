@@ -13,6 +13,7 @@
  * - **rate limiting** — a connection-level token bucket. The *agent*-level
  *   bucket is shared between all sockets of one agent and therefore lives in
  *   the gateway; the session merely references it.
+ * - **subscription** — optional per-session domain event subscription (US-020).
  *
  * The class deliberately has no knowledge of `ws` lifecycle events or of the
  * handler registry: the gateway drives it.
@@ -162,6 +163,14 @@ export class TokenBucketRegistry {
 /** How many `seq`s one socket remembers for dedupe (bounded memory). */
 export const DEFAULT_DEDUPE_WINDOW = 10_000;
 
+/** Per-session domain event subscription (US-020). */
+export interface WsSubscription {
+  /** Include domain-only events in replay/live push (default false, admin only). */
+  readonly includeDomainEvents: boolean;
+  /** Optional filter: only these event types. Applies to domain events if enabled. */
+  readonly types?: readonly string[];
+}
+
 export interface WsSessionOptions {
   readonly id: string;
   readonly socket: WebSocket;
@@ -206,6 +215,9 @@ export class WsSession {
    * attached by the gateway when the session binds an identity.
    */
   agentBucket?: TokenBucket;
+
+  /** Per-session domain event subscription (US-020). */
+  subscription?: WsSubscription;
 
   constructor(options: WsSessionOptions) {
     this.id = options.id;

@@ -18,8 +18,8 @@
 | US-016 | **完成（本地验证）** | `agentmesh` CLI：register/login/whoami、channel、message、task 全生命周期、watch、doctor；复用 SDK |
 | US-019…US-021 | 未开始 | Web |
 
-测试基线：**502**
-（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270）。
+测试基线：**521**
+（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -112,7 +112,7 @@ US-013 的关键语义：
 
 未注册、请求返回 `-32601`：
 
-- `system.subscribe`（已定：US-020 实现，admin opt-in domain-only 事件；实现前保持 21/22）
+- `system.subscribe`（US-020 已实现，RPC 22/22）
 
 US-014 的关键语义：
 
@@ -176,7 +176,7 @@ US-018 的关键语义：
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| `system.subscribe` 未实现 | **US-020**（归属已定：单列；见 decisions.md） | 客户端只能用现有 event 通知；domain-only 事件仅 admin 显式订阅后可见 |
+| `system.subscribe` | **US-020 完成** | admin opt-in domain-only 事件；现有 notification 广播不变；Web 默认只用 SDK `on()` |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |

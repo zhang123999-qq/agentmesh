@@ -33,6 +33,7 @@ export * from './auth/rate-limit.js';
 export * from './modules/accounts.js';
 export * from './modules/channels.js';
 export * from './modules/tasks.js';
+export * from './modules/system.js';
 export * from './ws/framing.js';
 export * from './ws/session.js';
 export * from './ws/gateway.js';

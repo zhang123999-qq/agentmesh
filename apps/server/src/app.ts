@@ -48,6 +48,7 @@ import {
   type TasksModuleOptions,
   type TasksService,
 } from './modules/tasks.js';
+import { registerSystemModule } from './modules/system.js';
 import { createHandlerRegistry, type HandlerRegistry } from './registry.js';
 import { WsGateway, type WsGatewayOptions } from './ws/gateway.js';
 
@@ -264,6 +265,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     app.addHook('preClose', async () => {
       await gateway.close();
     });
+    // ---- system module (US-020) -------------------------------------------
+    if (store !== undefined) {
+      app.decorate(
+        'system',
+        registerSystemModule(registry, {
+          gateway,
+          workspaceId: 'default',
+        }),
+      );
+    }
   }
 
   // ---- channel + message module (US-007) --------------------------------

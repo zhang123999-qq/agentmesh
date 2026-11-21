@@ -6,6 +6,9 @@ import type { NotificationEventType } from './events.js';
  *
  * Grouped for discoverability and also exposed flat (`METHOD_NAMES`) for
  * dispatch tables, routing validation and tests.
+ *
+ * `system.subscribe` (US-020): admin-only, opt-in domain events, per-socket
+ * subscription added to existing notification broadcast (not a replacement).
  */
 
 export const METHODS = {

@@ -91,3 +91,18 @@ export const taskAwardParamsSchema = z.object({
   strategy: z.enum(['manual', 'auto']).optional(),
 });
 export type TaskAwardParams = z.infer<typeof taskAwardParamsSchema>;
+
+/**
+ * JSON-RPC params for `system.subscribe` (US-020).
+ *
+ * Admin-only. Adds an opt-in subscription for domain-only events to the
+ * existing notification broadcast on this socket. Does not replace or
+ * diminish the workspace-wide broadcast of notification events.
+ */
+export const systemSubscribeParamsSchema = z.object({
+  /** Include domain-only events (default false). Requires admin role. */
+  includeDomainEvents: z.boolean().optional(),
+  /** Optional filter: only receive these event types (applies to domain events if enabled). */
+  types: z.array(z.string().min(1)).optional(),
+});
+export type SystemSubscribeParams = z.infer<typeof systemSubscribeParamsSchema>;

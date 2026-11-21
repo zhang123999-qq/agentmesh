@@ -93,7 +93,12 @@ import {
   readPingTs,
   readResumeFrame,
 } from './framing.js';
-import { TokenBucket, TokenBucketRegistry, WsSession } from './session.js';
+import {
+  TokenBucket,
+  TokenBucketRegistry,
+  WsSession,
+  type WsSubscription,
+} from './session.js';
 
 /** Methods callable before the socket is authenticated. */
 export const ANONYMOUS_WS_METHODS: readonly string[] = [
@@ -326,6 +331,25 @@ export class WsGateway {
   /** Diagnostics/tests: bounded per-agent bucket registry size. */
   get agentBucketCount(): number {
     return this.#agentBuckets.size;
+  }
+
+  /** Set per-session domain event subscription (US-020). */
+  setSessionSubscription(
+    sessionId: string,
+    subscription: WsSubscription,
+  ): void {
+    const session = [...this.#sessions].find((s) => s.id === sessionId);
+    if (session !== undefined) {
+      session.subscription = subscription;
+    }
+  }
+
+  /** Check if a session's subscription allows a domain event. */
+  #sessionWantsDomainEvent(session: WsSession, eventType: string): boolean {
+    const sub = session.subscription;
+    if (sub === undefined || !sub.includeDomainEvents) return false;
+    if (sub.types === undefined || sub.types.length === 0) return true;
+    return sub.types.includes(eventType);
   }
 
   // ------------------------------------------------------------- connection
@@ -847,11 +871,17 @@ export class WsGateway {
     );
     let replayed = 0;
     for (const row of rows) {
-      // Only pushable events cross the wire; domain-only rows are projection
-      // input and must not leak into the client's resume stream.
-      if (!isNotificationEventType(row.type)) continue;
-      if (!session.markSent(row.seq)) continue;
-      if (session.send(eventNotification(row))) replayed += 1;
+      // Notification events always replay.
+      if (isNotificationEventType(row.type)) {
+        if (!session.markSent(row.seq)) continue;
+        if (session.send(eventNotification(row))) replayed += 1;
+        continue;
+      }
+      // Domain-only events: only replay if this session subscribed to them.
+      if (this.#sessionWantsDomainEvent(session, row.type)) {
+        if (!session.markSent(row.seq)) continue;
+        if (session.send(eventNotification(row))) replayed += 1;
+      }
     }
     session.advance(currentSeq);
 
@@ -893,22 +923,27 @@ export class WsGateway {
    * workspace as an event notification (`method: <event.type>`, `params.seq`).
    *
    * Semantics:
-   * - domain-only event types (`message.created`, `task.bid.placed`, …) are
-   *   projection input and are **not** pushed — the same filter `resume` uses;
-   * - a `seq` already delivered on a socket is skipped (`WsSession.markSent`),
+   * - Notification events are pushed to all authenticated sockets in the workspace.
+   * - Domain-only event types (`message.created`, `task.bid.placed`, …) are
+   *   only pushed to sessions that have subscribed via `system.subscribe`
+   *   with `includeDomainEvents: true` and matching `types` filter.
+   * - A `seq` already delivered on a socket is skipped (`WsSession.markSent`),
    *   so re-broadcasting the same row is a no-op *on the server side*;
-   * - unauthenticated sockets never see tenant data.
+   * - Unauthenticated sockets never see tenant data.
    *
    * @returns the number of sockets the notification was written to.
    */
   publishEvent(event: StoredEvent): number {
-    if (!isNotificationEventType(event.type)) return 0;
     const frame = eventNotification(event);
     let delivered = 0;
+    const isNotification = isNotificationEventType(event.type);
     for (const session of this.#sessions) {
       if (!session.authenticated) continue;
       if (session.workspaceId !== event.workspaceId) continue;
       if (session.hasSent(event.seq)) continue;
+      if (!isNotification && !this.#sessionWantsDomainEvent(session, event.type)) {
+        continue;
+      }
       // Only record the delivery once the write actually went out: a socket
       // that is closing must not lose the seq from its own dedupe set.
       if (!session.send(frame)) continue;

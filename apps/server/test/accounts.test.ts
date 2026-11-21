@@ -759,6 +759,8 @@ describe('HTTP transport wiring', () => {
       METHODS.channel.list,
       METHODS.message.history,
       METHODS.message.send,
+      // US-020 system module (registers when store is wired).
+      METHODS.system.subscribe,
       // US-008 / US-009 register the task lifecycle methods alongside them.
       METHODS.task.award,
       METHODS.task.bid,
