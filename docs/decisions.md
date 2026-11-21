@@ -228,3 +228,61 @@ CAS（version +1）；后续 progress 只原地更新 `tasks.progress`，不碰 
 - 不做多租户隔离（reclaim/register/presence 的单租户债务已记录）。
 - 不做 token 撤销黑名单（记录为 US-022+ 候选）。
 - 不做数据库静态加密。
+
+
+## US-019 Next.js 管理后台（7 个决策）
+
+1. **登录角色**：**admin-only 进入后台**；agent 走 CLI/SDK，不提供 Web 只读视图。
+   理由：MVP 面向运维/管理员；agent 的只读需求（看任务进度、收消息）用 CLI/SDK 覆盖，
+   避免 Web 权限矩阵与 RBAC 爆炸。若未来需要 agent Web 视图，单独列故事 + 完整 RBAC 设计。
+
+   权限矩阵（后台）：
+
+   | 页面/操作 | admin | agent |
+   | --- | --- | --- |
+   | 登录/进入后台 | ✅ | ❌（返回 403） |
+   | 频道列表/消息/历史 | ✅ | — |
+   | 任务看板（publish/bid/award/progress/review/reassign/cancel） | ✅ | — |
+   | 事件流（SDK on()） | ✅ | — |
+   | 审计视图（`system.subscribe` includeDomainEvents） | ✅ | — |
+
+2. **SSR 边界**：**SSR 跳过 WS 连接**；仅在 CSR（客户端水合后）建立连接。
+   实现：`next/dynamic` 引入 `AgentMeshClientProvider`（client-only），`useEffect` 内
+   `connect()` + `authenticate`。SSR 只渲染静态骨架/首屏数据（如有），不创建 SDK client。
+
+3. **去重键**：**同一 seq 跨列表只渲染一次**。
+   实现：全局 `SeqRegistry`（Map<seq, boolean>）在 `onMessage`/`onHistoryPage` 中校验；
+   `message.history` 返回的 `channelTotal` 仅作统计，UI 不以它判断去重。
+   与 US-010（历史补偿用同一 seq 空间）+ US-014（SDK `lastSeenSeq`）保持一致。
+
+4. **gap_too_large UX**：默认 **auto**；banner 提示"已重新同步"；
+   可在设置里切换到 strict（显示"连接中断，点击重新同步"按钮，调用
+   `client.resyncChannelHistory(channelId)`）。auto 模式下 SDK 自动重连 + 清空游标，
+   Web 只做 toast 提示。
+
+5. **产物展示**：>1 MiB 仅展示引用（URL/ID），**不实现上传端点**。
+   上传端点单列 US-022+，需先改安全边界决策（调大 maxPayload 或新增 HTTP endpoint）。
+   本故事只渲染 `artifacts` 数组中的字符串为链接/复制按钮。
+
+6. **事件流范围**：
+   - 默认视图：**仅非 domain-only 事件**（SDK `on(type)` 拼装 11 种 notification）。
+   - **审计视图（admin-only）**：提供 `system.subscribe` 面板，
+     `includeDomainEvents: true` + 可选 `types` 过滤，展示 domain-only 事件。
+     UI 入口：右上角 "审计视图" 开关，仅 admin 可见；切换时先 `subscribeSystem`
+     再 `resyncChannelHistory`（domain 事件走 resume，非 history）。
+
+7. **浏览器 transport 验证**：**Playwright smoke + 手工清单**。
+   - Playwright：登录 → 进频道 → 发消息 → history 补偿 → 实时收到 message.new
+     → 创建任务 → award → progress → complete → review approve → done；
+     覆盖 gap_too_large（手动断网触发）与 -32007 重试入口。
+   - 手工清单：Chrome/Firefox/Safari 各一轮（带内认证、重连、SSR 无 WS）。
+   - 若发现 SDK 浏览器 transport 缺陷：**独立 fix: 提交 SDK**，Web 故事引用该提交。
+
+## US-019 偏离说明
+
+- 被否决：**agent 只读 Web 视图**（决策 1）；理由：MVP 避免 RBAC 复杂度，
+  agent 需求用 CLI/SDK 覆盖。
+- 被否决：**SSR 建立 WS**（决策 2）；理由：首屏不需要实时数据，SSR + WS 会导致
+  服务端每请求一个连接，无益且难以管理生命周期。
+- 被否决：**按列表独立去重**（决策 3）；理由：同一 seq 在消息列表与事件流
+  同时出现会导致重复渲染，用户体验差；US-010/014 保证 seq 全局唯一。

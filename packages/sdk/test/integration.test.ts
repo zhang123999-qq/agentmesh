@@ -7,6 +7,7 @@ import {
   AgentMeshClient,
   type TransportFactory,
 } from '../src/index.js';
+import { METHODS as _METHODS } from '@agentmesh/protocol';
 
 const nodeTransport: TransportFactory = (url, _options, handlers) => {
   const socket = new WebSocket(url);
@@ -73,5 +74,48 @@ describe('SDK against the real server', () => {
     );
     expect(history.channelTotal).toBeGreaterThanOrEqual(1);
     expect(history.messages[0]?.seq).toBe(sent.message.seq);
+  }, 15_000);
+
+  it('admin can subscribe to system events with includeDomainEvents', async () => {
+    const { db, repos } = openStore(':memory:');
+    const app = await startServer({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        PORT: '0',
+        HOST: '127.0.0.1',
+        DB_PATH: ':memory:',
+        JWT_SECRET: 'test-secret-value-1234567890',
+        LOG_LEVEL: 'silent',
+        ALLOW_ADMIN_SELF_REGISTER: 'true',
+      }),
+      logger: createLogger({ level: 'silent' }),
+      store: { db, repos },
+    });
+    closers.push(async () => {
+      await app.close();
+      db.close();
+    });
+
+    const address = app.server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const client = new AgentMeshClient({
+      url: `ws://127.0.0.1:${port}/ws`,
+      transportFactory: nodeTransport,
+      autoReconnect: false,
+    });
+    closers.push(() => client.close());
+
+    await client.connect();
+    const adminAuth = await client.register({ name: 'admin-test', role: 'admin' });
+    expect(adminAuth.role).toBe('admin');
+
+    // Subscribe to system events with domain events
+    const subResult = await client.subscribeSystem({
+      includeDomainEvents: true,
+      types: ['task.bid.placed', 'message.created'],
+    });
+    expect(subResult.subscribed).toBe(true);
+    expect(subResult.includeDomainEvents).toBe(true);
+    expect(subResult.types).toEqual(['task.bid.placed', 'message.created']);
   }, 15_000);
 });

@@ -11,6 +11,14 @@ import type {
   TaskReviewParams,
 } from '@agentmesh/protocol';
 
+/** US-020: system.subscribe params */
+export interface SystemSubscribeParams {
+  /** Include domain-only events (default false). Requires admin role. */
+  includeDomainEvents?: boolean;
+  /** Optional filter: only receive these event types (applies to domain events if enabled). */
+  types?: readonly string[];
+}
+
 /**
  * Server response views.
  *
@@ -76,10 +84,14 @@ export interface MessageView {
   readonly messageId: string;
   readonly channelId: string;
   readonly senderId: string;
-  readonly body: string;
-  /** Global events.seq shared with live pushes. */
-  readonly seq: number;
+  /** Message content (from history). */
+  readonly body?: string;
+  /** Message content (from live notification). */
+  readonly content?: string;
+  /** Global events.seq shared with live pushes. Optional in live notifications (envelope has it). */
+  readonly seq?: number;
   readonly createdAt: number;
+  readonly replyToMessageId?: string;
 }
 
 export interface MessageHistoryResult {

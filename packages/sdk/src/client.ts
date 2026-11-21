@@ -20,6 +20,7 @@ import {
   type TaskReassignParams,
   type TaskReviewParams,
 } from '@agentmesh/protocol';
+import type { SystemSubscribeParams } from './types.js';
 
 import { AgentMeshError, errorFromResponse } from './errors.js';
 import {
@@ -94,6 +95,7 @@ export interface EventPayloadMap {
     channelId: string;
     senderId: string;
     content: string;
+    body?: string;
     createdAt: number;
     seq?: number;
     replyToMessageId?: string;
@@ -432,8 +434,9 @@ export class AgentMeshClient {
     for (let guard = 0; guard < 10_000; guard += 1) {
       const page = await this.history({ channelId, afterSeq: cursor, limit });
       for (const message of page.messages) {
-        if (!seen.has(message.seq)) {
-          seen.add(message.seq);
+        const seq = message.seq ?? 0;
+        if (!seen.has(seq)) {
+          seen.add(seq);
           messages.push(message);
         }
       }
@@ -489,6 +492,18 @@ export class AgentMeshClient {
 
   cancel(params: TaskCancelParams): Promise<TaskMutationResult> {
     return this.#request(METHODS.task.cancel, params);
+  }
+
+  /**
+   * Admin-only: subscribe to domain-only events on this socket.
+   * Adds to existing notification broadcast (does not replace it).
+   */
+  async subscribeSystem(params: SystemSubscribeParams = {}): Promise<{
+    subscribed: boolean;
+    includeDomainEvents: boolean;
+    types: readonly string[] | undefined;
+  }> {
+    return this.#request(METHODS.system.subscribe, params);
   }
 
   // ------------------------------------------------------------- internals
