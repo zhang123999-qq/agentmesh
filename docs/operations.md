@@ -90,3 +90,14 @@ curl -kf https://localhost:8443/health
   定时器、关闭 SQLite。
 - **JWT_SECRET 轮换**：替换 secret 后重启；所有 token 立即失效，需通知 agent 重新认证。
 - **无 Docker 环境**：`npm run verify:docker` 等价验证 health / migrate / backup。
+
+## M9 运行时签字（阻塞，2026-11-21）
+
+- 尝试 `docker version` / `docker compose version`：本机 Docker 引擎不可用（命令不存在）。
+- 已完成的本地等价验证：`npm run verify:docker` →
+  `{"health":true,"migrate":true,"backup":true,"gracefulShutdown":true,"platform":"win32"}`
+  （Windows 上 SIGTERM 不触发 POSIX 信号，标记为 n/a；真实 Linux 关闭路径未验证）。
+- **未签字**：`docker compose up`、Caddy internal TLS/证书、Linux SIGTERM、
+  容器内 seed-admin、容器卷持久化与恢复演练，均需在具备 Docker 的环境执行。
+- 复现步骤：安装 Docker Engine ≥24 + Compose v2，按本节上方的 Docker 部署命令执行，
+  并用 `docker compose logs server` 检查启动/关闭日志。
