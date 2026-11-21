@@ -43,8 +43,9 @@ describe('migrations', () => {
       'event_log_integrity',
       'bid_events_per_version',
       'task_progress_and_side_effect_events',
+      'task_completed_at',
     ]);
-    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('is idempotent: a second run applies nothing and does not throw', () => {
@@ -52,7 +53,7 @@ describe('migrations', () => {
     const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(listAppliedMigrations(db)).toHaveLength(7);
+    expect(listAppliedMigrations(db)).toHaveLength(8);
 
     // Third run on the same handle: still fine.
     expect(() => runMigrations(db)).not.toThrow();
@@ -64,11 +65,11 @@ describe('migrations', () => {
     db.exec('DELETE FROM schema_version');
     expect(getSchemaVersion(db)).toBe(0);
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
   });
 
-  it('appends only v3-v7 to an existing v2 database without rebuilding tables', () => {
+  it('appends only v3-v8 to an existing v2 database without rebuilding tables', () => {
     const db = openDatabase(':memory:');
 
     // Rebuild a v2-shaped database exactly the way an older build left it.
@@ -107,9 +108,9 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [3, 4, 5, 6, 7], version: 7 });
-    expect(getSchemaVersion(db)).toBe(7);
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8], version: 8 });
+    expect(getSchemaVersion(db)).toBe(8);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
 
     // Only indexes were added — the table definition is byte-identical.
     const schemaAfter = db
@@ -257,6 +258,16 @@ describe('migrations', () => {
     expect(() => insertDependency.run()).not.toThrow();
   });
 
+  it('adds tasks.completed_at (v8)', () => {
+    const { db } = makeStore();
+    const completedAt = columnsOf(db, 'tasks').find(
+      (column) => column.name === 'completed_at',
+    );
+    expect(completedAt, 'tasks.completed_at').toBeDefined();
+    expect(completedAt?.type).toBe('INTEGER');
+    expect(completedAt?.notnull).toBe(0);
+  });
+
   it('applies v4 idempotently even when the column already exists', () => {
     const { db } = makeStore();
     const v4 = MIGRATIONS.find((m) => m.version === 4);
@@ -268,11 +279,11 @@ describe('migrations', () => {
     expect(columnsOf(db, 'accounts').filter((c) => c.name === 'secret_hash')).toHaveLength(1);
 
     // A manual body re-run must not corrupt the ledger.
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(runMigrations(db).applied).toEqual([]);
   });
 
-  it('upgrades an existing v3 database to v7 without rewriting account rows', () => {
+  it('upgrades an existing v3 database to v8 without rewriting account rows', () => {
     const db = openDatabase(':memory:');
     db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
@@ -301,8 +312,8 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [4, 5, 6, 7], version: 7 });
-    expect(getSchemaVersion(db)).toBe(7);
+    expect(result).toEqual({ applied: [4, 5, 6, 7, 8], version: 8 });
+    expect(getSchemaVersion(db)).toBe(8);
     expect(columnsOf(db, 'accounts').map((c) => c.name)).toContain('secret_hash');
 
     const row = db

@@ -2,6 +2,32 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-013 审核 / 改派 / 取消
+
+测试基线：**437**（core 51 / protocol 47 / store 71 / server 268）。
+
+- 新增 `task.review` / `task.reassign` / `task.cancel`（注册方法 18 → 21 / 22；
+  仅 `system.subscribe` 未实现）。`task.cancel` 已补进 protocol METHODS。
+- `task.review`：approve→done（写 `completed_at`）；reject/request-revision→
+  in_progress，progress 保留。`review→failed` 走 admin 显式 `task.fail`。
+- `task.reassign`：目标必须是已注册账号（否则 `-32004`）；active 任务回到
+  in_progress；旧 live bid 与 progress 保留；admin 自接标记 `humanTakeover`。
+- `task.cancel`：open/bidding/in_progress/review→cancelled；终态拒绝。
+  US-009 的 `closeExpiredBidding` 统一改为 `task.cancelled`（reason
+  `bidding_window_closed`），状态行为不变。
+- 协议：`task.cancelled` 进入 notification 列表并新增 payload schema；
+  新增 review/reassign/cancel params schema；v8 迁移加 `tasks.completed_at`。
+- 测试：13 个 review/reassign/cancel 集成测试 + WS 生命周期通知测试。
+
+### US-013 偏离/决策
+
+- review/reassign/cancel 未额外限流；仅 admin，单条 CAS。
+- reassign 目标资格取“已注册账号”，不要求频道成员（任务不属于频道）。
+- 旧 assignee 的 live bid 保留；reassign 保留 progress（可能仍是 100，下一次
+  progress 覆盖）。
+- `task.cancel` 不允许 awarded；awarded 的出口是 admin `task.fail`。
+- `system.subscribe` 仍未实现，建议归 US-021 或单列。
+
 ## 2026-11-20 — US-012 CRDT 收敛层
 
 测试基线：**422**（core 51 / protocol 47 / store 70 / server 254）。

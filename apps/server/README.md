@@ -67,7 +67,7 @@ always oldest-first and include `nextBeforeSeq` / `nextAfterSeq` plus
 
 ## Tasks (US-008 / US-009 / US-011)
 
-When a store is wired the server registers nine task methods:
+When a store is wired the server registers twelve task methods:
 
 | Method | Roles | Notes |
 | --- | --- | --- |
@@ -79,7 +79,10 @@ When a store is wired the server registers nine task methods:
 | `task.award` | `admin` | `expectedVersion` CAS; manual requires a live bid, auto scores. |
 | `task.progress` | assigned `agent` (or admin if assignee) | First report starts `awarded → in_progress`; later reports update progress **without** bumping version. |
 | `task.complete` | assigned `agent` | `in_progress → review` with `expectedVersion`; all `parentId` children must be `done`. |
-| `task.fail` | assigned `agent` | `awarded/in_progress → failed`; blocks a non-terminal parent via `blockedBy`. |
+| `task.fail` | assigned `agent`; admin in review | `awarded/in_progress → failed`; blocks a non-terminal parent via `blockedBy`. Admin may fail a `review` task explicitly. |
+| `task.review` | `admin` | `approve → done` (writes `completedAt`); `reject`/`request-revision → in_progress`, progress preserved. |
+| `task.reassign` | `admin` | Target must be a registered account; `awarded/in_progress/review → in_progress`; old bid/progress preserved. |
+| `task.cancel` | `admin` | `open/bidding/in_progress/review → cancelled`; terminal tasks reject (`-32003`). |
 
 The lifecycle is one transition table (`modules/tasks.ts → TASK_TRANSITIONS`):
 `open → bidding → awarded → in_progress → review → done`, with `→ failed`
@@ -154,6 +157,22 @@ the future.
   emitted by the transaction frame stack after commit.
 - **Artifacts.** Only references (URL/ID) travel over WS; content above 1 MiB
   must use an HTTP upload (do not raise `maxPayload`).
+
+### Review, reassign and cancel (US-013)
+
+- **Review** is admin-only on a `review` task with `expectedVersion`:
+  `approve → done` (sets `completedAt`, progress 100); `reject` and
+  `request-revision → in_progress` (progress preserved). `review → failed` is
+  the admin's explicit `task.fail`, not a fourth review decision.
+- **Reassign** is admin-only for `awarded/in_progress/review`. The target must
+  be a registered account (`-32004` otherwise); the task returns to
+  `in_progress`, keeps progress and keeps the old live bid for audit.
+  Reassigning to the admin's own agent sets `humanTakeover: true`.
+- **Cancel** is admin-only for `open/bidding/in_progress/review`; terminal
+  tasks reject with `-32003`. It appends `task.cancelled`. The US-009
+  `closeExpiredBidding` sweeper uses the same `task.cancelled` event.
+- Notifications (`task.review.decided`, `task.reassigned`, `task.cancelled`)
+  use the same transaction frame stack and are pushed after commit.
 
 There is no `task.cancel` RPC: `open → cancelled` is reached only by the
 internal reclaim sweeper. Manual cancellation is deferred to US-013, so an

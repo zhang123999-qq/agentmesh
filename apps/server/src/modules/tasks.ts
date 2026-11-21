@@ -143,6 +143,19 @@ function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'cancelled';
 }
 
+function isReassignableStatus(status: TaskStatus): boolean {
+  return status === 'awarded' || status === 'in_progress' || status === 'review';
+}
+
+function isCancellableStatus(status: TaskStatus): boolean {
+  return (
+    status === 'open' ||
+    status === 'bidding' ||
+    status === 'in_progress' ||
+    status === 'review'
+  );
+}
+
 function invalidTransition(taskId: string, from: TaskStatus, to: TaskStatus): ProtocolError {
   return new ProtocolError(
     JsonRpcErrorCode.InvalidState,
@@ -230,6 +243,14 @@ function parentCycle(taskId: string, chain: readonly string[]): ProtocolError {
     JsonRpcErrorCode.InvalidState,
     `Task parent chain contains a cycle at ${taskId}`,
     { taskId, chain: [...chain], reason: 'dependency_cycle' },
+  );
+}
+
+function targetAgentNotFound(agentId: string): ProtocolError {
+  return new ProtocolError(
+    JsonRpcErrorCode.NotFound,
+    `Unknown target agent: ${agentId}`,
+    { toAgentId: agentId, reason: 'target_not_found' },
   );
 }
 
@@ -374,6 +395,19 @@ function readOptionalStrategy(
   return raw;
 }
 
+function readReviewDecision(
+  input: Record<string, unknown>,
+): 'approve' | 'reject' | 'request-revision' {
+  const raw = input.decision;
+  if (raw !== 'approve' && raw !== 'reject' && raw !== 'request-revision') {
+    throw invalidParams(
+      "decision must be 'approve', 'reject' or 'request-revision'",
+      'decision',
+    );
+  }
+  return raw;
+}
+
 function readProgressValue(input: Record<string, unknown>): number {
   const raw = input.progress;
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0 || raw > 100) {
@@ -470,6 +504,8 @@ export interface TaskView {
   readonly deadline: number | null;
   /** Completion percentage 0-100 (updated in place without a version bump). */
   readonly progress: number;
+  /** Epoch ms set when review approval moves the task to `done`. */
+  readonly completedAt: number | null;
   /** Window close time; non-null means bidding is opened at publish. */
   readonly biddingDeadline: number | null;
   readonly blockedBy: string[];
@@ -625,6 +661,44 @@ export interface FailResult {
   readonly seq: number;
 }
 
+export interface ReviewInput {
+  readonly taskId: string;
+  readonly expectedVersion: number;
+  readonly decision: 'approve' | 'reject' | 'request-revision';
+  readonly comment?: string;
+}
+
+export interface ReviewResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
+export interface ReassignInput {
+  readonly taskId: string;
+  readonly expectedVersion: number;
+  readonly toAgentId: string;
+  readonly reason?: string;
+}
+
+export interface ReassignResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
+export interface CancelInput {
+  readonly taskId: string;
+  readonly expectedVersion: number;
+  readonly reason?: string;
+}
+
+export interface CancelResult {
+  readonly task: TaskView;
+  readonly version: number;
+  readonly seq: number;
+}
+
 export interface TasksModuleOptions {
   /** Connection used to wrap `CAS + event append` in one transaction. */
   readonly db: AgentMeshDatabase;
@@ -674,6 +748,7 @@ function toView(task: Task): TaskView {
     parentId: task.parentId,
     deadline: task.deadline,
     progress: task.progress,
+    completedAt: task.completedAt,
     biddingDeadline: readBiddingDeadline(task.meta),
     blockedBy: [...task.blockedBy],
     createdAt: task.createdAt,
@@ -1290,19 +1365,13 @@ export class TasksService {
   ): FailResult {
     const task = this.#tasks.get(input.taskId, workspaceId);
     if (task === undefined) throw notFoundTask(input.taskId);
-    this.#assertAssignee(task, actor);
-    if (task.status !== 'awarded' && task.status !== 'in_progress') {
-      throw invalidTransition(task.id, task.status, 'failed');
-    }
+    this.#assertCanFail(task, actor);
 
     const at = this.#clock();
     const persisted = withTransaction(this.#db, () => {
       const current = this.#tasks.get(input.taskId, workspaceId);
       if (current === undefined) throw notFoundTask(input.taskId);
-      this.#assertAssignee(current, actor);
-      if (current.status !== 'awarded' && current.status !== 'in_progress') {
-        throw invalidTransition(current.id, current.status, 'failed');
-      }
+      this.#assertCanFail(current, actor);
 
       const changes = this.#tasks.updateWithVersion(
         current.id,
@@ -1373,6 +1442,238 @@ export class TasksService {
     };
   }
 
+  /**
+   * Admin review of a `review` task.
+   *
+   * approve → done (completedAt = now); reject / request-revision → in_progress.
+   * Progress is preserved on rejection so the next progress report continues
+   * from the agent's last state. `review → failed` is the admin's explicit
+   * `task.fail` path, not a review decision.
+   */
+  review(
+    input: ReviewInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): ReviewResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    const target = input.decision === 'approve' ? 'done' : 'in_progress';
+    if (task.status !== 'review') {
+      throw invalidTransition(task.id, task.status, target);
+    }
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      if (current.status !== 'review') {
+        throw invalidTransition(current.id, current.status, target);
+      }
+
+      const changes = this.#tasks.updateWithVersion(
+        current.id,
+        input.expectedVersion,
+        target === 'done'
+          ? { status: 'done', progress: 100, completedAt: at }
+          : { status: 'in_progress' },
+        { workspaceId, updatedAt: at },
+      );
+      if (changes === 0) {
+        const now = this.#tasks.get(current.id, workspaceId);
+        throw versionConflict(
+          current.id,
+          input.expectedVersion,
+          now?.version ?? null,
+          current.status,
+          target,
+        );
+      }
+
+      const version = input.expectedVersion + 1;
+      const event = this.#events.append({
+        aggregateId: aggregateIdOf('task', current.id),
+        type: 'task.review.decided',
+        version,
+        payload: {
+          taskId: current.id,
+          reviewerId: actor.agentId,
+          decision: input.decision,
+          ...(input.comment === undefined ? {} : { comment: input.comment }),
+          version,
+        },
+        ts: at,
+        workspaceId,
+      });
+
+      const row = this.#tasks.get(current.id, workspaceId);
+      if (row === undefined) throw notFoundTask(current.id);
+      return { row, event, version };
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  /**
+   * Reassign an active task to another registered agent. The task returns to
+   * `in_progress`; progress and live bids are preserved (audit/history).
+   */
+  reassign(
+    input: ReassignInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): ReassignResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    if (!isReassignableStatus(task.status)) {
+      throw invalidTransition(task.id, task.status, 'in_progress');
+    }
+    if (this.#accounts.get(input.toAgentId, workspaceId) === undefined) {
+      throw targetAgentNotFound(input.toAgentId);
+    }
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      if (!isReassignableStatus(current.status)) {
+        throw invalidTransition(current.id, current.status, 'in_progress');
+      }
+      if (this.#accounts.get(input.toAgentId, workspaceId) === undefined) {
+        throw targetAgentNotFound(input.toAgentId);
+      }
+
+      const changes = this.#tasks.updateWithVersion(
+        current.id,
+        input.expectedVersion,
+        { status: 'in_progress', assignee: input.toAgentId },
+        { workspaceId, updatedAt: at },
+      );
+      if (changes === 0) {
+        const now = this.#tasks.get(current.id, workspaceId);
+        throw versionConflict(
+          current.id,
+          input.expectedVersion,
+          now?.version ?? null,
+          current.status,
+          'in_progress',
+        );
+      }
+
+      const version = input.expectedVersion + 1;
+      const event = this.#events.append({
+        aggregateId: aggregateIdOf('task', current.id),
+        type: 'task.reassigned',
+        version,
+        payload: {
+          taskId: current.id,
+          fromAgentId: current.assignee ?? undefined,
+          toAgentId: input.toAgentId,
+          reassignedBy: actor.agentId,
+          humanTakeover: actor.agentId === input.toAgentId,
+          ...(input.reason === undefined ? {} : { reason: input.reason }),
+          version,
+        },
+        ts: at,
+        workspaceId,
+      });
+
+      const row = this.#tasks.get(current.id, workspaceId);
+      if (row === undefined) throw notFoundTask(current.id);
+      return { row, event, version };
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  /** Admin cancellation for open/bidding/in_progress/review tasks. */
+  cancel(
+    input: CancelInput,
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): CancelResult {
+    const task = this.#tasks.get(input.taskId, workspaceId);
+    if (task === undefined) throw notFoundTask(input.taskId);
+    if (!isCancellableStatus(task.status)) {
+      throw invalidTransition(task.id, task.status, 'cancelled');
+    }
+
+    const at = this.#clock();
+    const persisted = withTransaction(this.#db, () => {
+      const current = this.#tasks.get(input.taskId, workspaceId);
+      if (current === undefined) throw notFoundTask(input.taskId);
+      if (!isCancellableStatus(current.status)) {
+        throw invalidTransition(current.id, current.status, 'cancelled');
+      }
+      return this.#cancelWithCas(
+        current,
+        input.expectedVersion,
+        actor.agentId,
+        input.reason,
+        at,
+        workspaceId,
+      );
+    });
+
+    return {
+      task: toView(persisted.row),
+      version: persisted.version,
+      seq: persisted.event.seq,
+    };
+  }
+
+  #cancelWithCas(
+    task: Task,
+    expectedVersion: number,
+    cancelledBy: string | undefined,
+    reason: string | undefined,
+    at: number,
+    workspaceId: string,
+  ): { row: Task; event: ReturnType<EventStore['append']>; version: number } {
+    const changes = this.#tasks.updateWithVersion(
+      task.id,
+      expectedVersion,
+      { status: 'cancelled' },
+      { workspaceId, updatedAt: at },
+    );
+    if (changes === 0) {
+      const now = this.#tasks.get(task.id, workspaceId);
+      throw versionConflict(
+        task.id,
+        expectedVersion,
+        now?.version ?? null,
+        task.status,
+        'cancelled',
+      );
+    }
+
+    const version = expectedVersion + 1;
+    const event = this.#events.append({
+      aggregateId: aggregateIdOf('task', task.id),
+      type: 'task.cancelled',
+      version,
+      payload: {
+        taskId: task.id,
+        ...(cancelledBy === undefined ? {} : { cancelledBy }),
+        ...(reason === undefined ? {} : { reason }),
+        at,
+      },
+      ts: at,
+      workspaceId,
+    });
+
+    const row = this.#tasks.get(task.id, workspaceId);
+    if (row === undefined) throw notFoundTask(task.id);
+    return { row, event, version };
+  }
+
   /** Defensive DAG invariant: walk parent links and reject a cycle. */
   assertParentChainAcyclic(
     taskId: string,
@@ -1394,6 +1695,23 @@ export class TasksService {
   #assertAssignee(task: Task, actor: AuthContext): void {
     if (task.assignee === null || task.assignee !== actor.agentId) {
       throw notAssignee(task.id, task.assignee);
+    }
+  }
+
+  /**
+   * `task.fail` is callable by the assigned agent (awarded/in_progress) and by
+   * an admin (awarded/in_progress/review), which is the review → failed escape.
+   */
+  #assertCanFail(task: Task, actor: AuthContext): void {
+    if (actor.role === 'admin') {
+      if (!isReassignableStatus(task.status)) {
+        throw invalidTransition(task.id, task.status, 'failed');
+      }
+      return;
+    }
+    this.#assertAssignee(task, actor);
+    if (task.status !== 'awarded' && task.status !== 'in_progress') {
+      throw invalidTransition(task.id, task.status, 'failed');
     }
   }
 
@@ -1538,13 +1856,17 @@ export class TasksService {
       if (deadline === null || deadline > now) continue;
       if (this.#taskBids.count(task.id, { workspaceId }) > 0) continue;
       try {
-        closed.push(
-          this.transition(task.id, 'cancelled', {
-            expectedVersion: task.version,
-            reason: 'bidding_window_closed',
+        const cancelled = withTransaction(this.#db, () =>
+          this.#cancelWithCas(
+            task,
+            task.version,
+            undefined,
+            'bidding_window_closed',
+            now,
             workspaceId,
-          }),
+          ),
         );
+        closed.push(toView(cancelled.row));
       } catch (err) {
         if (
           err instanceof ProtocolError &&
@@ -1877,6 +2199,93 @@ export function registerTasksModule(
       return result;
     },
     { description: 'Mark the task failed (assigned agent); blocks a live parent' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.review,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_AWARD_ROLES);
+      const input = asParamsObject(params, METHODS.task.review);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const expectedVersion = readRequiredNonNegativeInteger(input, 'expectedVersion');
+      const decision = readReviewDecision(input);
+      const comment = readOptionalString(input, 'comment', MAX_PROGRESS_NOTE_LENGTH);
+      const result = service.review(
+        {
+          taskId,
+          expectedVersion,
+          decision,
+          ...(comment === undefined ? {} : { comment }),
+        },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        status: result.task.status,
+        version: result.version,
+        msg: 'task.review.decided',
+      });
+      return result;
+    },
+    { description: 'Admin review: approve → done, reject/revision → in_progress' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.reassign,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_AWARD_ROLES);
+      const input = asParamsObject(params, METHODS.task.reassign);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const expectedVersion = readRequiredNonNegativeInteger(input, 'expectedVersion');
+      const toAgentId = readRequiredString(input, 'toAgentId', 128);
+      const reason = readOptionalString(input, 'reason', MAX_FAIL_REASON_LENGTH);
+      const result = service.reassign(
+        {
+          taskId,
+          expectedVersion,
+          toAgentId,
+          ...(reason === undefined ? {} : { reason }),
+        },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        assignee: result.task.assignee,
+        version: result.version,
+        msg: 'task.reassigned',
+      });
+      return result;
+    },
+    { description: 'Admin reassign to another registered agent (returns to in_progress)' },
+  );
+
+  registry.registerHandler(
+    METHODS.task.cancel,
+    async (ctx, params) => {
+      const auth = requireRole(ctx, TASK_AWARD_ROLES);
+      const input = asParamsObject(params, METHODS.task.cancel);
+      const taskId = readRequiredString(input, 'taskId', 128);
+      const expectedVersion = readRequiredNonNegativeInteger(input, 'expectedVersion');
+      const reason = readOptionalString(input, 'reason', MAX_FAIL_REASON_LENGTH);
+      const result = service.cancel(
+        { taskId, expectedVersion, ...(reason === undefined ? {} : { reason }) },
+        auth,
+        ctx.workspaceId,
+      );
+      ctx.logger.info({
+        taskId,
+        agentId: auth.agentId,
+        status: result.task.status,
+        version: result.version,
+        msg: 'task.cancelled',
+      });
+      return result;
+    },
+    { description: 'Admin cancel an open/bidding/in_progress/review task' },
   );
 
   return service;

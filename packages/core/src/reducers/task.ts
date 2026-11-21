@@ -249,7 +249,17 @@ export const taskReducer: Reducer<TaskState> = (state, event: CoreEvent) => {
       return {
         ...next,
         assignee: toAgentId,
-        status: needsAward ? 'awarded' : next.status,
+        // Reassignment of an active task puts the new owner back to work;
+        // a pre-award task still needs an award.
+        status: needsAward ? 'awarded' : 'in_progress',
+        updatedAt: event.ts,
+      };
+    }
+
+    case 'task.cancelled': {
+      return {
+        ...next,
+        status: 'cancelled',
         updatedAt: event.ts,
       };
     }

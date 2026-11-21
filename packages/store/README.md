@@ -61,6 +61,7 @@ repos.tasks.updateWithVersion(task.id, task.version, { status: 'awarded', assign
 | v5 | `event_log_integrity` | `uq_events_aggregate_version`：`(workspace_id, aggregate_id, version)` 唯一，防止多写者产生重复聚合版本 |
 | v6 | `bid_events_per_version` | 删除 v5 全量唯一索引，改为**部分唯一索引** `uq_events_aggregate_version_status`（排除 `task.bid.placed` / `task.bid.received`），允许同一 task version 上有多条竞标事件，同时仍保证状态事件每版本唯一 |
 | v7 | `task_progress_and_side_effect_events` | `tasks.progress` 列（原地更新，不递增 version）；部分唯一索引扩展到排除 `task.progress.updated` / `task.dependency.failed` |
+| v8 | `task_completed_at` | `tasks.completed_at` 列（review approve 进入 done 时写入） |
 
 v5 的索引是**强制约束**：如果已有数据库里存在重复的
 `(workspace_id, aggregate_id, version)`，迁移会明确失败而不是静默跳过；先修复重复行再启动。

@@ -21,6 +21,31 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-013 审核 / 改派 / 取消（6 个决策）
+
+1. **review decision 映射**：`approve → done`、`reject → in_progress`、
+   `request-revision → in_progress`。不扩 decision 枚举；`review → failed` 由
+   admin 显式调用 `task.fail`。
+2. **reject / request-revision**：保留 progress；artifacts 以事件追加，不覆盖。
+3. **reassign 目标资格**：必须是已注册账号（不要求频道成员）；不存在 → `-32004`。
+4. **旧 assignee 的 live bid**：保留，不转 tombstone（审计与 OR-Set 收敛不变）。
+5. **cancel 入边**：`open` / `bidding` / `in_progress` / `review` → `cancelled`；
+   `cancelled` 是终态，不可重新打开。
+6. **窗口关闭统一事件**：`closeExpiredBidding` 使用 `task.cancelled`
+   （reason `bidding_window_closed`），不再写 `task.status.changed`；状态行为不变。
+
+新增状态机边（已落在 `TASK_TRANSITIONS` 或专用 CAS 路径）：
+
+```
+review → done            (task.review approve)
+review → in_progress     (task.review reject / request-revision)
+awarded|in_progress|review → in_progress   (task.reassign)
+open|bidding|in_progress|review → cancelled (task.cancel / closeExpiredBidding)
+review → failed          (admin task.fail)
+```
+
+
+
 ## US-011 progress 启动语义（选 A）
 
 **决定**：首次 `task.progress` 在 `awarded` 状态下执行 `awarded → in_progress` 的

@@ -259,6 +259,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version_status
  * with a status event (or with each other) without representing a new state.
  */
 const TASK_PROGRESS_SQL = 'ALTER TABLE tasks ADD COLUMN progress INTEGER NOT NULL DEFAULT 0';
+const TASK_COMPLETED_AT_SQL = 'ALTER TABLE tasks ADD COLUMN completed_at INTEGER';
 
 const SIDE_EFFECT_EVENT_INDEX_SQL = `
 DROP INDEX IF EXISTS uq_events_aggregate_version_status;
@@ -327,6 +328,15 @@ export const MIGRATIONS: readonly Migration[] = [
         db.exec(TASK_PROGRESS_SQL);
       }
       db.exec(SIDE_EFFECT_EVENT_INDEX_SQL);
+    },
+  },
+  {
+    version: 8,
+    name: 'task_completed_at',
+    up: (db) => {
+      if (!hasColumn(db, 'tasks', 'completed_at')) {
+        db.exec(TASK_COMPLETED_AT_SQL);
+      }
     },
   },
 ];

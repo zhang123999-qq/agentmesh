@@ -77,9 +77,13 @@ docs                本目录
   - 实时推送订阅 `EventsDao.onAppend`，domain-only 事件不推送；
   - presence（进程内）、心跳、连接级/agent 级软限流；
   - Origin allow-list（CSWSH 防护）与 1 MiB `maxPayload`。
-- 业务模块：账号（US-005）、频道/消息与历史（US-007/010）、任务/竞标/授标/执行
-  （US-008/009/011）。
-- 已注册 18 / 21 个协议方法；审核、改派仍缺失（见 [status.md](status.md)）。
+- 业务模块：账号（US-005）、频道/消息与历史（US-007/010）、任务/竞标/授标/执行/
+  审核/改派/取消（US-008/009/011/013）。
+- 已注册 21 / 22 个协议方法；仅 `system.subscribe` 未实现（见 [status.md](status.md)）。
+- 生命周期：`open → bidding → awarded → in_progress → review → done`；
+  `review` 可 approve→done / reject|request-revision→in_progress；
+  `awarded/in_progress/review` 可 reassign→in_progress；
+  `open/bidding/in_progress/review` 可 cancel→cancelled。
 - **竞标事件与版本**：`task.publish` 带 `biddingDeadline` 时直接进入 `bidding`；
   bid **不递增** task version，而是以当前 version 追加 `task.bid.placed`（审计）
   与 `task.bid.received`（实时通知）——v6 部分唯一索引允许同版本多条 bid 事件，
@@ -91,6 +95,10 @@ docs                本目录
   `→ failed` CAS（追加 `task.failed`）。`task.progress.updated` /
   `task.dependency.failed` 是 side-effect notification，v7 部分唯一索引允许它们与
   状态事件共享版本。
+- **审核/改派/取消**：`task.review` 的 approve→done（写 `completed_at`），
+  reject/request-revision→in_progress；`task.reassign` 把 active 任务改派给已注册
+  agent 并回到 in_progress；`task.cancel` 追加 `task.cancelled`。`closeExpiredBidding`
+  也统一使用 `task.cancelled`。
 
 ## CRDT 收敛层（US-012）
 

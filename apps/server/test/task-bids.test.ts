@@ -400,9 +400,10 @@ describe('bidding window close', () => {
     expect(result.count).toBe(1);
     expect(result.closed[0]).toMatchObject({ id: task.id, status: 'cancelled' });
     expect(h.repos.tasks.get(task.id)?.status).toBe('cancelled');
-    expect(h.taskLog(task.id).at(-1)?.payload).toMatchObject({
-      from: 'bidding',
-      to: 'cancelled',
+    const last = h.taskLog(task.id).at(-1);
+    expect(last?.type).toBe('task.cancelled');
+    expect(last?.payload).toMatchObject({
+      taskId: task.id,
       reason: 'bidding_window_closed',
     });
   });

@@ -1103,3 +1103,123 @@ describe('ws live task progress notification', () => {
     await adminClient.close();
   });
 });
+
+describe('ws live task lifecycle notifications', () => {
+  it('pushes task.reassigned, task.review.decided and task.cancelled to an admin', async () => {
+    const harness = await startHarness({
+      config: { allowAdminSelfRegister: true },
+      ws: { livePush: true },
+    });
+    const adminClient = await TestClient.open(harness.url);
+    await adminClient.request(
+      METHODS.agent.register,
+      { name: 'admin-lifecycle', role: 'admin' },
+      'admin-lifecycle-reg',
+    );
+    await adminClient.waitFor((frame) => frame.type === 'welcome');
+    const worker = await registerAgent(harness, 'worker-lifecycle');
+    const next = await registerAgent(harness, 'next-lifecycle');
+
+    const published = await adminClient.request(
+      METHODS.task.publish,
+      { title: 'lifecycle task', biddingDeadline: Date.now() + 60_000 },
+      'publish-lifecycle',
+    );
+    const task = (published.result as { task?: { id?: string; version?: number } }).task;
+    expect(task?.id).toBeTruthy();
+
+    await worker.client.request(
+      METHODS.task.bid,
+      { taskId: task?.id as string, price: 10 },
+      'bid-lifecycle',
+    );
+    await adminClient.request(
+      METHODS.task.award,
+      {
+        taskId: task?.id as string,
+        expectedVersion: 1,
+        awardeeId: worker.agentId,
+      },
+      'award-lifecycle',
+    );
+
+    await adminClient.request(
+      METHODS.task.reassign,
+      {
+        taskId: task?.id as string,
+        expectedVersion: 2,
+        toAgentId: next.agentId,
+      },
+      'reassign-lifecycle',
+    );
+    await adminClient.waitFor(
+      (frame) =>
+        frame.method === 'task.reassigned' &&
+        (
+          (frame.params as Record<string, unknown> | undefined)?.payload as
+            | Record<string, unknown>
+            | undefined
+        )?.taskId === task?.id,
+      { label: 'task.reassigned live push' },
+    );
+
+    const progressed = await next.client.request(
+      METHODS.task.progress,
+      { taskId: task?.id as string, progress: 40 },
+      'progress-lifecycle',
+    );
+    expect(progressed.error).toBeUndefined();
+    const completed = await next.client.request(
+      METHODS.task.complete,
+      { taskId: task?.id as string, expectedVersion: 3 },
+      'complete-lifecycle',
+    );
+    expect(completed.error).toBeUndefined();
+
+    await adminClient.request(
+      METHODS.task.review,
+      {
+        taskId: task?.id as string,
+        expectedVersion: 4,
+        decision: 'approve',
+      },
+      'review-lifecycle',
+    );
+    await adminClient.waitFor(
+      (frame) =>
+        frame.method === 'task.review.decided' &&
+        (
+          (frame.params as Record<string, unknown> | undefined)?.payload as
+            | Record<string, unknown>
+            | undefined
+        )?.taskId === task?.id,
+      { label: 'task.review.decided live push' },
+    );
+
+    const cancellable = await adminClient.request(
+      METHODS.task.publish,
+      { title: 'cancel me' },
+      'publish-cancel',
+    );
+    const cancelTask = (cancellable.result as { task?: { id?: string } }).task;
+    await adminClient.request(
+      METHODS.task.cancel,
+      { taskId: cancelTask?.id as string, expectedVersion: 1 },
+      'cancel-lifecycle',
+    );
+    await adminClient.waitFor(
+      (frame) =>
+        frame.method === 'task.cancelled' &&
+        (
+          (frame.params as Record<string, unknown> | undefined)?.payload as
+            | Record<string, unknown>
+            | undefined
+        )?.taskId === cancelTask?.id,
+      { label: 'task.cancelled live push' },
+    );
+
+    await worker.client.close();
+    await next.client.close();
+    await adminClient.close();
+  });
+});

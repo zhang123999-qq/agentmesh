@@ -10,10 +10,11 @@
 | US-010 | **完成（本地验证）** | `message.history` 双向 seq 游标、成员权限、离线补偿 |
 | US-011 | **完成（本地验证）** | progress/complete/fail、父子 DAG、失败传播、终态吸收 |
 | US-012 | **完成（本地验证）** | OR-Set 收敛/压缩、LWW presence、业务不变量 |
-| US-013…US-021 | 未开始 | 审核/改派/取消、SDK、CLI、mock agents、Web、Docker |
+| US-013 | **完成（本地验证）** | review/reassign/cancel；任务可闭环到 done/failed/cancelled |
+| US-014…US-021 | 未开始 | SDK、adapters、CLI、mock agents、Web、Docker |
 
-测试基线：**422**
-（core 51 / protocol 47 / store 70 / server 254）。
+测试基线：**437**
+（core 51 / protocol 47 / store 71 / server 268）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -80,26 +81,39 @@ US-012 的关键语义：
   新增 WS 测试断言心跳终止会向其它连接广播 `offline`。
 - 任务归属仍走 CAS，不进入 CRDT；晚到 bid 不会改变已授标任务的 assignee。
 
-## 已实现的 RPC（18 / 21）
+US-013 的关键语义：
+
+- `task.review`（admin）：`approve → done`（写 `completedAt`）；
+  `reject` / `request-revision → in_progress`（保留 progress，artifacts 追加）。
+  `review → failed` 走 admin 显式 `task.fail`，不扩 review decision 枚举。
+- `task.reassign`（admin）：目标 agent 必须是已注册账号（否则 `-32004`）；
+  状态 `awarded/in_progress/review → in_progress`；旧 assignee 的 live bid 保留；
+  progress 保留；改派后旧 assignee 调 progress/complete/fail → `-32002`。
+  admin 把任务改派给自己时 `humanTakeover: true`。
+- `task.cancel`（admin）：允许 `open/bidding/in_progress/review`；
+  终态不可取消（`-32003`）；追加 `task.cancelled` notification。
+- US-009 的 `closeExpiredBidding` 统一使用 `task.cancelled`（reason
+  `bidding_window_closed`），状态仍为 cancelled，行为回归测试通过。
+- review/reassign/cancel 未额外限流（仅 admin，且每次是单条 CAS）；已记录为决策。
+
+## 已实现的 RPC（21 / 22）
 
 | 分组 | 方法 |
 | --- | --- |
 | agent | `agent.register` / `agent.authenticate` / `agent.list` |
 | channel | `channel.create` / `channel.join` / `channel.leave` / `channel.list` |
 | message | `message.send` / `message.history` |
-| task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` / `task.progress` / `task.complete` / `task.fail` |
+| task | `task.publish` / `task.list` / `task.get` / `task.bid` / `task.bids` / `task.award` / `task.progress` / `task.complete` / `task.fail` / `task.review` / `task.reassign` / `task.cancel` |
 
 未注册、请求返回 `-32601`：
 
-- `task.review` / `task.reassign`
-- `system.subscribe`
+- `system.subscribe`（建议归 US-021 或单列系统事件订阅故事）
 
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
-| 审核/改派/取消未实现 | US-013 | 任务可到 `review`，但无法 approve/reject/reassign/cancel |
-| 无 `task.cancel` RPC | US-013 | 管理员只能等 sweeper 回收 |
+| `system.subscribe` 未实现 | US-021 / 单列 | 客户端只能用现有 event 通知，不能显式订阅系统事件 |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
@@ -108,11 +122,11 @@ US-012 的关键语义：
 
 ## 下一步
 
-1. **US-013**：`task.review` / `task.reassign` / `task.cancel`、审核决策与人工兜底。
-2. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
-   `message.history` / `task.bid` / `task.award` 的 zod schema。
-3. **US-015…US-017**：adapters / CLI / 三智能体 demo。
-4. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
+1. **US-014**：SDK（Web 必须复用它，不得自建第二套续传）；同时补
+   `message.history` / `task.bid` / `task.award` 的 zod schema 与 total 语义。
+2. **US-015…US-017**：adapters / CLI / 三智能体 demo。
+3. **US-018**：Docker/部署脚本（数据目录 700、TLS 反代、密钥注入）。
+4. **US-019…US-021**：Web（必须复用 SDK）；`system.subscribe` 建议随 US-021 或单列。
 
 ## 溯源说明
 
@@ -121,11 +135,13 @@ US-012 的关键语义：
 溯源只能用文件内容 hash 对比。当前关键文件：
 
 - `apps/server/src/modules/tasks.ts` SHA-256
-  `2d2c2cb4e8ad76b1c44e286c861283b27e1a3f96b2436ce9ef4e2f8f63bf805f`
+  `1b5e3362e53598a99d3d858404f997be9988c8f46aa3979eaa5b33820528d777`
 - `apps/server/test/tasks.test.ts` SHA-256
   `7b823e460e8f975a885a1b22215a905630063105335be133c42119e9095c6adf`
 - `apps/server/test/task-execution.test.ts` SHA-256
   `c287174b494e8c62c58282af2afb4715c4a888930318892b2af856ed64970b4e`
+- `apps/server/test/task-review.test.ts` SHA-256
+  `6c312596d32c085108cb08d13588108db21d459792a1f6c9e512060e34701dfb`
 
-（hash 为 US-011 后的基线。）
+（hash 为 US-013 后的基线。）
 

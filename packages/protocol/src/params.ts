@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { taskReviewDecisionSchema } from './events.js';
+
 /**
  * JSON-RPC params for the US-011 execution methods.
  *
@@ -41,3 +43,26 @@ export const taskFailParamsSchema = z.object({
   reason: z.string().max(MAX_PROGRESS_NOTE_LENGTH).optional(),
 });
 export type TaskFailParams = z.infer<typeof taskFailParamsSchema>;
+
+export const taskReviewParamsSchema = z.object({
+  taskId: z.string().min(1),
+  expectedVersion: z.number().int().nonnegative(),
+  decision: taskReviewDecisionSchema,
+  comment: z.string().max(MAX_PROGRESS_NOTE_LENGTH).optional(),
+});
+export type TaskReviewParams = z.infer<typeof taskReviewParamsSchema>;
+
+export const taskReassignParamsSchema = z.object({
+  taskId: z.string().min(1),
+  expectedVersion: z.number().int().nonnegative(),
+  toAgentId: z.string().min(1),
+  reason: z.string().max(MAX_PROGRESS_NOTE_LENGTH).optional(),
+});
+export type TaskReassignParams = z.infer<typeof taskReassignParamsSchema>;
+
+export const taskCancelParamsSchema = z.object({
+  taskId: z.string().min(1),
+  expectedVersion: z.number().int().nonnegative(),
+  reason: z.string().max(MAX_PROGRESS_NOTE_LENGTH).optional(),
+});
+export type TaskCancelParams = z.infer<typeof taskCancelParamsSchema>;

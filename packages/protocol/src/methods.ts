@@ -36,6 +36,7 @@ export const METHODS = {
     fail: 'task.fail',
     review: 'task.review',
     reassign: 'task.reassign',
+    cancel: 'task.cancel',
   },
   system: {
     subscribe: 'system.subscribe',
@@ -65,6 +66,7 @@ export const METHOD_NAMES = [
   METHODS.task.fail,
   METHODS.task.review,
   METHODS.task.reassign,
+  METHODS.task.cancel,
   METHODS.system.subscribe,
 ] as const;
 

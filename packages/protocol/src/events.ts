@@ -46,6 +46,7 @@ export const NOTIFICATION_EVENT_TYPES = [
   'task.failed',
   'task.review.decided',
   'task.reassigned',
+  'task.cancelled',
   'task.dependency.failed',
   'system.error',
 ] as const;
@@ -201,6 +202,14 @@ export const taskReassignedPayloadSchema = z.object({
 });
 export type TaskReassignedPayload = z.infer<typeof taskReassignedPayloadSchema>;
 
+export const taskCancelledPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  cancelledBy: z.string().optional(),
+  reason: z.string().optional(),
+  at: z.number().int().nonnegative().optional(),
+});
+export type TaskCancelledPayload = z.infer<typeof taskCancelledPayloadSchema>;
+
 export const taskDependencyFailedPayloadSchema = z.object({
   parentTaskId: z.string().min(1),
   subtaskId: z.string().min(1),
@@ -290,6 +299,7 @@ export const eventPayloadSchemas = {
   'task.failed': taskFailedPayloadSchema,
   'task.review.decided': taskReviewDecidedPayloadSchema,
   'task.reassigned': taskReassignedPayloadSchema,
+  'task.cancelled': taskCancelledPayloadSchema,
   'task.dependency.failed': taskDependencyFailedPayloadSchema,
   'system.error': systemErrorPayloadSchema,
 } satisfies Record<NotificationEventType, z.ZodTypeAny>;
@@ -380,6 +390,7 @@ export const eventNotificationSchema = z.discriminatedUnion('type', [
   eventNotificationOf('task.failed', taskFailedPayloadSchema),
   eventNotificationOf('task.review.decided', taskReviewDecidedPayloadSchema),
   eventNotificationOf('task.reassigned', taskReassignedPayloadSchema),
+  eventNotificationOf('task.cancelled', taskCancelledPayloadSchema),
   eventNotificationOf('task.dependency.failed', taskDependencyFailedPayloadSchema),
   eventNotificationOf('system.error', systemErrorPayloadSchema),
 ]);
