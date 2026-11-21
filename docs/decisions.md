@@ -21,6 +21,23 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-017 demo（6 个决策）
+
+1. **终态路径**：覆盖 (a) approve→done、(b) request-revision→rework→approve→done、
+   (c) open→cancel。reassign 已在 US-013 测试覆盖，demo 不重复。
+2. **断言形式**：输出 JSON（最终 TaskView + awards/exploration + 事件类型序列 +
+   全局 seq 序列 + versionConflict），由测试机器断言，不靠人工看日志。
+3. **award 可复现**：`DEMO_MODE=true` 强制冷启动探索；受控 bids 让唯一技能合格的
+   agent 进入探索候选。输出标注 `demoMode: true`。
+4. **编排**：共享进程，三个 mock agent 各一个 `AgentMeshClient`（planner 为 admin，
+   另加 coder/reviewer）；启动快、断言直接。
+5. **client 生命周期**：demo 创建并拥有全部 client；cleanup 顺序
+   adapter.close → client.close → app.close → db.close；输出 `cleanExit`。
+6. **失败注入**：包含一次 stale award 的 `-32007`，断言
+   taskId/expectedVersion/currentVersion；不注入 gap_too_large（SDK 单测覆盖）。
+
+
+
 ## US-015 AgentAdapter（5 个决策）
 
 1. **能力声明**：构造时静态声明，`getCapabilities()` 暴露

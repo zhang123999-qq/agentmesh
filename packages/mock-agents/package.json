@@ -1,0 +1,41 @@
+{
+  "name": "@agentmesh/mock-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentMesh mock agents (planner/coder/reviewer) and the end-to-end demo",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "demo": "node dist/demo.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@agentmesh/adapters": "*",
+    "@agentmesh/core": "*",
+    "@agentmesh/protocol": "*",
+    "@agentmesh/sdk": "*",
+    "@agentmesh/server": "*",
+    "@agentmesh/store": "*",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2",
+    "vitest": "^5.1.0"
+  }
+}

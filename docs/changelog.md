@@ -2,6 +2,23 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-017 mock agents + 一键 demo
+
+测试基线：**452**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 268）。
+
+- 新增 `@agentmesh/mock-agents`：`PlannerAgent`（admin）、`CoderAgent`、`ReviewerAgent`，
+  基于 `BaseAgentAdapter` + 注入的 `AgentMeshClient`；`executeTask` 先 progress，
+  再 `getTask` 取最新 version 后 complete。
+- `npm run demo`：真实 server（内存 SQLite + seed admin + port 0）+ 三个 mock agent；
+  覆盖 approve→done、request-revision→rework→approve→done、open→cancel；
+  注入 stale award 并断言 `VersionConflictError` 三元组。
+- `DEMO_MODE=true` 保证冷启动探索确定；输出 `demo-output.json`。
+- 共享进程；cleanup 顺序 adapter→client→app→db；输出 `cleanExit`。
+- **发现的真实 bug（独立修复 `6931664`）**：`task.bid.received` payload 含
+  `eta/approach/confidence: null`，protocol zod 用 `.optional()` 不接受 null，
+  SDK 静默丢弃通知。服务端改为省略 null optional，并补测试。
+- 新增 demo 测试（30s 超时），断言完成态、exploration、事件序列与 cleanExit。
+
 ## 2026-11-21 — US-015 AgentAdapter 与 5 家模板
 
 测试基线：**451**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / server 268）。

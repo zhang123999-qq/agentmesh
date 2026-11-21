@@ -136,6 +136,18 @@ docs                本目录
 - grok / muse / hermes / openclaw / codex 五个模板共用 `BaseAgentAdapter`，
   只做配置校验与能力声明，不调用真实 provider API。
 
+## Mock agents & demo（US-017）
+
+- `packages/mock-agents`：`PlannerAgent`（admin：publish/award/review/cancel）、
+  `CoderAgent` / `ReviewerAgent`（bid/progress/complete），均包装
+  `BaseAgentAdapter` + 注入的 SDK client。
+- `npm run demo` 启动真实 server（内存 SQLite、seed admin、port 0），运行 approve
+  路径、request-revision→rework→approve 路径、open→cancel 路径，并注入一次 stale
+  award（-32007）。
+- `DEMO_MODE=true` 使冷启动探索确定；输出 `demo-output.json`（tasks / awards /
+  eventTypes / eventSeqs / versionConflict / cleanExit）。
+- demo 发现的服务端 bug（bid 通知 null optional 字段被 zod 丢弃）已单独修复。
+
 ## 测试金字塔
 
 - 单元：协议 schema、DAO/迁移、reducer、评分策略（未来）。

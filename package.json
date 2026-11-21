@@ -20,6 +20,7 @@
     "test": "npm run test --workspaces --if-present",
     "verify": "npm run typecheck && npm run lint && npm test",
     "audit": "npm audit --audit-level=high",
+    "demo": "npm run build && npm run demo -w @agentmesh/mock-agents",
     "clean": "npm run clean --workspaces --if-present"
   },
   "devDependencies": {

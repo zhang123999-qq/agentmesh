@@ -28,6 +28,9 @@ data/
 .DS_Store
 Thumbs.db
 
+# generated demo output
+demo-output.json
+
 # editor / IDE state
 .idea/
 .vscode/

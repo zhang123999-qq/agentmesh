@@ -13,10 +13,11 @@
 | US-013 | **完成（本地验证）** | review/reassign/cancel；任务可闭环到 done/failed/cancelled |
 | US-014 | **完成（本地验证）** | `@agentmesh/sdk`：传输无关、resume/去重/gap 策略、21 个类型化方法 |
 | US-015 | **完成（本地验证）** | `@agentmesh/adapters`：AgentAdapter + 5 家模板、中止/review 契约 |
-| US-016…US-021 | 未开始 | CLI、mock agents/demo、Web、Docker |
+| US-017 | **完成（本地验证）** | `npm run demo`：三智能体完整链路、rework、cancel、-32007 |
+| US-016 / US-018…US-021 | 未开始 | CLI、Docker、Web |
 
-测试基线：**451**
-（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / server 268）。
+测试基线：**452**
+（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 268）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -142,6 +143,19 @@ US-015 的关键语义：
 - 5 家模板：grok/muse/hermes/openclaw/codex，共用 `BaseAgentAdapter`，仅配置与校验不同；
   不发起真实 provider 网络调用。
 
+US-017 的关键语义：
+
+- `npm run demo` 起真实 server（内存 SQLite、seed admin、ephemeral port）+ 4 个 SDK client
+  （planner/admin + coder + reviewer）。
+- 覆盖：approve→done、request-revision→rework→approve→done、open→cancelled；
+  含一次 stale award 的 `-32007`（断言 taskId/expectedVersion/currentVersion）。
+- **DEMO_MODE=true** 强制冷启动探索；两次 award 均 `exploration: true`。
+- 共享进程；cleanup 顺序 adapter.close → client.close → app.close → db.close；
+  输出 `cleanExit`。
+- demo 发现并修复了一个服务端 bug：`task.bid.received` 的 null optional 字段会让
+  SDK 的 zod 解析失败并静默丢通知；已改为省略 null optional（`6931664`）。
+- `demo-output.json` 含 tasks / awards / eventTypes / eventSeqs / versionConflict。
+
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
@@ -151,14 +165,13 @@ US-015 的关键语义：
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
 | SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
-| mock-agents/CLI/Web/Docker 为空 | US-016…US-019 | 生态与部署未落地 |
+| CLI/Web/Docker 为空 | US-016/018/019 | 客户端工具与部署未落地 |
 
 ## 下一步
 
 1. **US-016 CLI**：复用 SDK；配置/profile、history 游标、-32007/-32005 UX。
-2. **US-017 demo**：planner/coder/reviewer + `npm run demo`，覆盖 approve 与 reject→重做。
-3. **US-018 Docker**：数据目录 700、TLS 反代、密钥注入、迁移入口。
-4. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
+2. **US-018 Docker**：数据目录 700、TLS 反代、密钥注入、迁移入口。
+3. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
 
 ## 溯源说明
 
