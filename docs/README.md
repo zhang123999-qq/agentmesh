@@ -22,7 +22,7 @@
 - [packages/mock-agents/README.md](../packages/mock-agents/README.md)
 - [apps/server/README.md](../apps/server/README.md)
 
-当前基线：**452 个测试全绿**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 268），
+当前基线：**454 个测试全绿**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 270），
 `npm audit --audit-level=high` 为 **0 vulnerabilities**。
 
 > 权威 `prd.json` 与提交链位于 qwenpaw 容器工作区；本地副本此前没有 git，

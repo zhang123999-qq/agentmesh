@@ -21,6 +21,21 @@
 | OR-Set 用 tag + stableFrontier 压缩 | 压缩只清理已删除 tag，live add tag 永不删除，保证压缩前后 live 集合一致 |
 | LWW 使用 (logical counter, nodeId) | 物理时钟不能跨节点做唯一 tie-break；离线用更高 stamp 的 offline 值，不硬删 |
 
+## US-018 Docker 部署（5 个决策）
+
+1. **迁移入口**：双通道——服务启动自动迁移（现状，`openStore`）+ 独立
+   `migrate` CLI；两者都幂等，v8 在已有库上安全执行。
+2. **密钥注入**：Docker secret 文件 `/run/secrets/jwt_secret`，entrypoint 读入
+   `JWT_SECRET`；不写入镜像、compose 或日志。
+3. **TLS 反代**：Caddy。本地默认 `tls internal`；生产设置 `DOMAIN` 并清空
+   `CADDY_TLS_DIRECTIVE` 以自动签发证书。`ALLOWED_ORIGINS` 必须显式且匹配。
+4. **数据/备份**：命名卷 `/app/data` mode 700；`backup` CLI 用 better-sqlite3
+   online backup（含 WAL）；恢复需停服替换 DB。
+5. **admin 引导**：`docker compose exec server node .../seed-admin.js`；不暴露 RPC，
+   不启用 `ALLOW_ADMIN_SELF_REGISTER`。
+
+
+
 ## US-017 demo（6 个决策）
 
 1. **终态路径**：覆盖 (a) approve→done、(b) request-revision→rework→approve→done、

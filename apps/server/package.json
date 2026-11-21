@@ -23,6 +23,8 @@
     "test": "vitest run",
     "start": "node dist/index.js",
     "seed:admin": "node dist/cli/seed-admin.js",
+    "migrate": "node dist/cli/migrate.js",
+    "backup": "node dist/cli/backup.js",
     "clean": "rm -rf dist"
   },
   "dependencies": {

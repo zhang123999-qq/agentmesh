@@ -21,6 +21,7 @@
     "verify": "npm run typecheck && npm run lint && npm test",
     "audit": "npm audit --audit-level=high",
     "demo": "npm run build && npm run demo -w @agentmesh/mock-agents",
+    "verify:docker": "npm run build && node docker/verify-local.mjs",
     "clean": "npm run clean --workspaces --if-present"
   },
   "devDependencies": {

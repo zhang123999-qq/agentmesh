@@ -56,3 +56,37 @@ DB_PATH=data/agentmesh.db \
 
 `GET /health` 返回 `status/version/protocolVersion/uptime/nodeEnv/timestamp`。
 WS 有心跳：一个 interval 未回 pong 的 socket 会被 `terminate()`。
+
+## Docker 部署（US-018）
+
+```bash
+mkdir -p docker/secrets
+openssl rand -base64 48 > docker/secrets/jwt_secret.txt
+chmod 600 docker/secrets/jwt_secret.txt
+ALLOWED_ORIGINS=https://localhost \
+  docker compose -f docker/compose.yaml up -d --build
+curl -kf https://localhost:8443/health
+```
+
+- **Secret**：只从 Docker secret `/run/secrets/jwt_secret` 注入；镜像/compose 不含明文。
+- **TLS**：Caddy 终止。生产设置 `DOMAIN=app.example.com`、
+  `CADDY_TLS_DIRECTIVE=`（空）、`ALLOWED_ORIGINS=https://app.example.com`、
+  `HTTPS_PORT=443 HTTP_PORT=80`。
+- **Migrations**：启动自动迁移；独立幂等命令：
+  ```bash
+  docker compose exec server node apps/server/dist/cli/migrate.js --db /app/data/agentmesh.db
+  ```
+- **Admin**：
+  ```bash
+  docker compose exec server \
+    node apps/server/dist/cli/seed-admin.js --name admin --owner ops
+  ```
+- **Backup**：
+  ```bash
+  docker compose exec server /usr/local/bin/agentmesh-backup
+  ```
+  恢复：停 server → 用备份替换 `/app/data/agentmesh.db`（先移除 `-wal`/`-shm`）→ 启动。
+- **Graceful shutdown**：`docker compose stop -t 20`；`preClose` 关闭 WS、清理 reclaim
+  定时器、关闭 SQLite。
+- **JWT_SECRET 轮换**：替换 secret 后重启；所有 token 立即失效，需通知 agent 重新认证。
+- **无 Docker 环境**：`npm run verify:docker` 等价验证 health / migrate / backup。

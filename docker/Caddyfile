@@ -1,0 +1,9 @@
+{
+  admin off
+}
+
+{$DOMAIN:localhost} {
+  {$CADDY_TLS_DIRECTIVE:tls internal}
+  encode zstd gzip
+  reverse_proxy server:8787
+}

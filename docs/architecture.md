@@ -148,6 +148,16 @@ docs                本目录
   eventTypes / eventSeqs / versionConflict / cleanExit）。
 - demo 发现的服务端 bug（bid 通知 null optional 字段被 zod 丢弃）已单独修复。
 
+## 部署（US-018）
+
+- 多阶段 Dockerfile：build 阶段含编译工具与 devDependencies，runtime 阶段只含
+  dist + production node_modules，非 root `app` 用户，`/app/data` mode 700。
+- `docker/compose.yaml`：server + Caddy；Caddy 终止 TLS（本地 `tls internal`，
+  生产自动证书）；`ALLOWED_ORIGINS` 显式；不设 `ALLOW_ADMIN_SELF_REGISTER`。
+- 密钥：Docker secret → entrypoint → `JWT_SECRET`，不进镜像/compose/日志。
+- 运维：`migrate`/`backup` CLI（v8 幂等、WAL 一致性备份）、`seed-admin` 容器内执行。
+- 无 Docker 环境时 `npm run verify:docker` 验证 health / migrate / backup / 关闭脚本。
+
 ## 测试金字塔
 
 - 单元：协议 schema、DAO/迁移、reducer、评分策略（未来）。

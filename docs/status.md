@@ -14,10 +14,11 @@
 | US-014 | **完成（本地验证）** | `@agentmesh/sdk`：传输无关、resume/去重/gap 策略、21 个类型化方法 |
 | US-015 | **完成（本地验证）** | `@agentmesh/adapters`：AgentAdapter + 5 家模板、中止/review 契约 |
 | US-017 | **完成（本地验证）** | `npm run demo`：三智能体完整链路、rework、cancel、-32007 |
-| US-016 / US-018…US-021 | 未开始 | CLI、Docker、Web |
+| US-018 | **完成（本地等价验证）** | Docker/Caddy、migrate/backup CLI、health/关闭脚本 |
+| US-016 / US-019…US-021 | 未开始 | CLI、Web |
 
-测试基线：**452**
-（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 268）。
+测试基线：**454**
+（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 270）。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 
@@ -156,6 +157,20 @@ US-017 的关键语义：
   SDK 的 zod 解析失败并静默丢通知；已改为省略 null optional（`6931664`）。
 - `demo-output.json` 含 tasks / awards / eventTypes / eventSeqs / versionConflict。
 
+US-018 的关键语义：
+
+- Dockerfile 多阶段、非 root `app` 用户、`/app/data` mode 700；runtime 不含 devDependencies。
+- 迁移：启动自动迁移 + 独立 `npm run migrate --workspace @agentmesh/server`；
+  v8 幂等。
+- 密钥：Docker secret `/run/secrets/jwt_secret` → entrypoint 注入 `JWT_SECRET`；
+  镜像/compose 不含明文。
+- TLS：Caddy 终止；本地 `tls internal`，生产 `DOMAIN` + 空 `CADDY_TLS_DIRECTIVE`
+  自动证书；`ALLOWED_ORIGINS` 显式。
+- 备份：`agentmesh-backup`（better-sqlite3 online backup，含 WAL）；恢复需停服替换 DB。
+- admin：`docker compose exec server node .../seed-admin.js`。
+- 本地等价验证 `npm run verify:docker` 通过 health/migrate/backup；**Docker 引擎不可用，
+  `docker compose up` 未在本机执行**。M9 的 compose 运行时验证待具备 Docker 的环境。
+
 ## 已知缺口 / 技术债
 
 | 项 | 归属 | 影响 |
@@ -165,13 +180,14 @@ US-017 的关键语义：
 | 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
 | SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
-| CLI/Web/Docker 为空 | US-016/018/019 | 客户端工具与部署未落地 |
+| CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |
 
 ## 下一步
 
 1. **US-016 CLI**：复用 SDK；配置/profile、history 游标、-32007/-32005 UX。
-2. **US-018 Docker**：数据目录 700、TLS 反代、密钥注入、迁移入口。
-3. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
+2. **US-019…US-021 Web**（必须复用 SDK）；`system.subscribe` 单列/随 US-021。
+3. **M9 compose 验证**：在具备 Docker 的环境执行 `docker compose up`，确认 `/health` 200
+   与 SIGTERM 优雅关闭后，再把 M9 标记为完全达成。
 
 ## 溯源说明
 

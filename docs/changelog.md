@@ -2,6 +2,24 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-21 — US-018 Docker / 部署
+
+测试基线：**454**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 270）。
+
+- 新增 `docker/Dockerfile`：多阶段构建、runtime 不含 devDependencies、非 root `app`
+  用户、`/app/data` mode 700、healthcheck。
+- 新增 `docker/compose.yaml` + `docker/Caddyfile`：Caddy 终止 TLS；本地 `tls internal`，
+  生产 `DOMAIN` + 空 directive 自动证书；`ALLOWED_ORIGINS` 显式；不设
+  `ALLOW_ADMIN_SELF_REGISTER`。
+- 新增 `docker/entrypoint.sh`：从 `/run/secrets/jwt_secret` 注入 `JWT_SECRET`；镜像/
+  compose 不含明文密钥。
+- 新增 server CLI：`migrate`（幂等迁移入口，v8）与 `backup`（better-sqlite3 online
+  backup，含 WAL）；`seed:admin` 仍为容器内本地命令。
+- 新增 `docker/backup.sh`、`docker/verify-local.mjs`、`npm run verify:docker`。
+- 验证：本地 health 200、迁移幂等、备份文件、优雅关闭脚本通过；**Docker 引擎不可用，
+  `docker compose up` 未在本机执行**。runtime audit 0。
+- 未修改服务端运行行为。
+
 ## 2026-11-21 — US-017 mock agents + 一键 demo
 
 测试基线：**452**（core 51 / protocol 47 / store 71 / sdk 7 / adapters 7 / mock-agents 1 / server 268）。
