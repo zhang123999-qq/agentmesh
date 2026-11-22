@@ -69,6 +69,9 @@ import {
   type TaskStatus,
   type TasksDao,
 } from '@agentmesh/store';
+import { compactBids, tagCounter, bidStableFrontier } from '@agentmesh/core';
+import { serializeError } from '../logging.js';
+import type { Logger } from 'pino';
 
 import type { AuthContext } from '../auth/roles.js';
 import { requireRole } from '../auth/roles.js';
@@ -728,6 +731,10 @@ export interface TasksModuleOptions {
   readonly idFactory?: () => string;
   /** Injectable clock for deterministic timestamps. */
   readonly clock?: () => number;
+  /** Compaction interval (ms); 0 = disabled. Default 0. */
+  readonly compactionIntervalMs?: number;
+  /** Logger for compaction events. */
+  readonly logger?: Logger;
 }
 
 function readBiddingDeadline(meta: Task['meta']): number | null {
@@ -788,6 +795,10 @@ export class TasksService {
   readonly #historyThreshold: number;
   readonly #explorationPolicy: ExplorationPolicy;
   readonly #bidBuckets: TokenBucketRegistry;
+  // eslint-disable-next-line no-unused-private-class-members
+  readonly #compactionIntervalMs: number;
+  #compactionTimer?: NodeJS.Timeout;
+  readonly #logger: Logger;
 
   constructor(options: TasksModuleOptions) {
     this.#db = options.db;
@@ -797,8 +808,10 @@ export class TasksService {
     this.#events = options.events;
     this.#workspaceId = options.workspaceId ?? 'default';
     this.#openTtlSeconds = options.openTtlSeconds ?? 0;
+    this.#compactionIntervalMs = options.compactionIntervalMs ?? 0;
     this.#idFactory = options.idFactory ?? (() => `tsk_${randomUUID()}`);
     this.#clock = options.clock ?? (() => Date.now());
+    this.#logger = options.logger ?? (() => {}) as unknown as Logger;
 
     this.#scoringWeights = { ...DEFAULT_SCORING_WEIGHTS, ...options.scoringWeights };
     assertValidScoringWeights(this.#scoringWeights);
@@ -1936,6 +1949,133 @@ export class TasksService {
       if (this.#tasks.get(id, workspaceId) === undefined) return id;
     }
     throw new Error('could not allocate a unique task id');
+  }
+
+  // --------------------------------------------------------- compaction (US-021B)
+
+  /**
+   * Compact the bid OR-Set for a specific task using the current stableFrontier.
+   * This is called by the compaction timer.
+   */
+  compactTaskBids(
+    taskId: string,
+    workspaceId: string = this.#workspaceId,
+  ): { compacted: boolean; removedCount: number; newFrontier: number } {
+    const currentFrontier = this.#taskBids.getStableFrontier(taskId, workspaceId);
+    const allBidsForFrontier = this.#taskBids.listByTask(taskId, { workspaceId, includeTombstones: true });
+    const newFrontier = bidStableFrontier(allBidsForFrontier);
+
+    if (newFrontier === currentFrontier) {
+      return { compacted: false, removedCount: 0, newFrontier: currentFrontier };
+    }
+
+    // Run compaction in a transaction
+    const result = withTransaction(this.#db, () => {
+      const allBids = this.#taskBids.listByTask(taskId, {
+        workspaceId,
+        includeTombstones: true,
+      });
+      // compactBids is called for its side-effects on the OR-Set logic
+      compactBids(allBids, newFrontier);
+
+      let removedCount = 0;
+      for (const row of allBids) {
+        const tag = `${row.createdAt}|${row.id}`;
+        if (row.tombstone && tagCounter(tag) <= newFrontier) {
+          this.#taskBids.delete(row.id, workspaceId);
+          removedCount += 1;
+        }
+      }
+      // Advance the stable frontier cursor
+      this.#taskBids.setStableFrontier(taskId, newFrontier, workspaceId);
+      return { removedCount, newFrontier };
+    });
+
+    return { compacted: true, removedCount: result.removedCount, newFrontier: result.newFrontier };
+  }
+
+  /**
+   * Run compaction for all tasks that have bid data.
+   * Called by the compaction timer.
+   */
+  runCompaction(
+    workspaceId: string = this.#workspaceId,
+  ): { compactedTasks: number; totalRemoved: number; errors: string[] } {
+    const errors: string[] = [];
+    let compactedTasks = 0;
+    let totalRemoved = 0;
+
+    // Get all tasks that have bid data
+    const tasksWithBids = new Set<string>();
+    const allBids = this.#taskBids.listByTask('', { workspaceId: this.#workspaceId, includeTombstones: true });
+    for (const bid of allBids) {
+      tasksWithBids.add(bid.taskId);
+    }
+
+    for (const taskId of tasksWithBids) {
+      try {
+        const result = this.compactTaskBids(taskId, workspaceId);
+        if (result.compacted) {
+          compactedTasks += 1;
+          totalRemoved += result.removedCount;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`task ${taskId}: ${msg}`);
+      }
+    }
+
+    return { compactedTasks, totalRemoved, errors };
+  }
+
+  /**
+   * Start the compaction timer. Called by app.ts if interval > 0.
+   */
+  startCompactionTimer(
+    intervalMs: number,
+    workspaceId: string = this.#workspaceId,
+  ): void {
+    if (this.#compactionTimer !== undefined) return;
+    if (intervalMs <= 0) return;
+
+    const timer = setInterval(() => {
+      try {
+        const { compactedTasks, totalRemoved, errors } = this.runCompaction(workspaceId);
+        if (compactedTasks > 0 || errors.length > 0) {
+          this.#events.append({
+            aggregateId: aggregateIdOf('task', 'compaction'),
+            type: 'task.compaction.completed',
+            payload: {
+              compactedTasks,
+              totalRemoved,
+              errors: errors.length > 0 ? errors : undefined,
+            },
+            ts: this.#clock(),
+            workspaceId,
+          });
+          if (errors.length > 0) {
+            this.#logger?.warn?.({ errors, msg: 'task.compaction.errors' });
+          } else {
+            this.#logger?.info?.({ compactedTasks, totalRemoved, msg: 'task.compaction.completed' });
+          }
+        }
+      } catch (err) {
+        this.#logger?.error?.({ err: serializeError(err), msg: 'task.compaction.failed' });
+      }
+    }, intervalMs);
+
+    timer.unref?.();
+    this.#compactionTimer = timer;
+  }
+
+  /**
+   * Stop the compaction timer. Called on graceful shutdown.
+   */
+  stopCompactionTimer(): void {
+    if (this.#compactionTimer !== undefined) {
+      clearInterval(this.#compactionTimer);
+      this.#compactionTimer = undefined;
+    }
   }
 }
 

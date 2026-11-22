@@ -103,6 +103,8 @@ export const DEFAULT_WS_AGENT_BURST = 10;
 export const DEFAULT_TASK_OPEN_TTL_SECONDS = 0;
 export const MAX_TASK_OPEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 export const DEFAULT_TASK_RECLAIM_INTERVAL_SECONDS = 60;
+/** Compaction interval (seconds); 0 = disabled. */
+export const DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS = 0;
 
 export const LOG_LEVELS = [
   'fatal',
@@ -173,6 +175,8 @@ export interface ServerConfig {
   readonly taskOpenTtlSeconds: number;
   /** Sweep interval (seconds) of the `open`-task reclaim timer. */
   readonly taskReclaimIntervalSeconds: number;
+  /** Compaction interval (seconds) of the bid set compaction timer; 0 = disabled. */
+  readonly taskBidCompactionIntervalSeconds: number;
   /** `development` | `test` | `production` | anything the deployer sets. */
   readonly nodeEnv: string;
   readonly isProduction: boolean;
@@ -512,6 +516,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       DEFAULT_TASK_RECLAIM_INTERVAL_SECONDS,
       MAX_TASK_OPEN_TTL_SECONDS,
     ),
+    taskBidCompactionIntervalSeconds: parseNonNegativeInt(
+      env.TASK_BID_COMPACTION_INTERVAL_SECONDS,
+      'TASK_BID_COMPACTION_INTERVAL_SECONDS',
+      DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS,
+      86_400, // max 24 hours
+    ),
     nodeEnv,
     isProduction,
     logLevel: parseLogLevel(env.LOG_LEVEL),
@@ -579,5 +589,6 @@ export function describeConfig(config: ServerConfig): Record<string, unknown> {
     wsAgentBurst: config.wsAgentBurst,
     taskOpenTtlSeconds: config.taskOpenTtlSeconds,
     taskReclaimIntervalSeconds: config.taskReclaimIntervalSeconds,
+    taskBidCompactionIntervalSeconds: config.taskBidCompactionIntervalSeconds,
   };
 }

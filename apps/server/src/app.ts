@@ -315,15 +315,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       workspaceId: 'default',
       demoMode: config.demoMode,
       openTtlSeconds: options.tasks?.openTtlSeconds ?? config.taskOpenTtlSeconds,
+      compactionIntervalMs: options.tasks?.compactionIntervalMs ?? config.taskBidCompactionIntervalSeconds * 1000,
     });
     app.decorate('tasks', tasks);
 
     // Stale `open` tasks are cancelled by a timer, but the sweep itself is a
     // pure `reclaimExpired(now)` call — tests drive it directly with an
     // injected `now` and never wait on the interval.
-    const intervalMs =
+    const reclaimIntervalMs =
       options.taskReclaimIntervalMs ?? config.taskReclaimIntervalSeconds * 1000;
-    const timer = setInterval(() => {
+    const reclaimTimer = setInterval(() => {
       try {
         const { reclaimed } = tasks.reclaimExpired();
         if (reclaimed.length > 0) {
@@ -336,12 +337,22 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       } catch (err) {
         app.log.error({ err: serializeError(err), msg: 'task.reclaim.failed' });
       }
-    }, intervalMs);
+    }, reclaimIntervalMs);
     // Never hold the event loop open just for the sweeper.
-    timer.unref();
+    reclaimTimer.unref();
     app.addHook('onClose', async () => {
-      clearInterval(timer);
+      clearInterval(reclaimTimer);
     });
+
+    // Bid set compaction timer (US-021B)
+    const compactionIntervalMs =
+      options.tasks?.compactionIntervalMs ?? config.taskBidCompactionIntervalSeconds * 1000;
+    if (compactionIntervalMs > 0) {
+      tasks.startCompactionTimer(compactionIntervalMs);
+      app.addHook('onClose', async () => {
+        tasks.stopCompactionTimer();
+      });
+    }
   }
 
   const uptime = options.uptime ?? defaultUptime;

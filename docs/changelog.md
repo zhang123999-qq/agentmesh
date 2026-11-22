@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-22 — US-021B 定时 compaction
+
+测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。
+
+- 复用 US-012 的 `compactOrSet` / `compactBids` 纯函数。
+- `apps/server/src/modules/tasks.ts` 新增：
+  - `compactTaskBids(taskId)`：单任务 compaction，推进 `stableFrontier`，物理删除已过 frontier 的 tombstone。
+  - `runCompaction()`：遍历所有有 bid 数据的任务，逐个 compaction。
+  - `startCompactionTimer(intervalMs)` / `stopCompactionTimer()`：定时器管理。
+  - compaction 完成后写 `task.compaction.completed` domain 事件（含 `compactedTasks` / `totalRemoved` / `errors`）。
+- 配置：`TASK_BID_COMPACTION_INTERVAL_SECONDS` (默认 0 = 关闭)；`app.ts` 启动时按开关注册定时器，优雅关闭时清理（与 reclaim 定时器一致，纳入 verify:docker SIGTERM 验证）。
+- 默认关闭，避免无谓开销；按需开启（如 `TASK_BID_COMPACTION_INTERVAL_SECONDS=3600`）。
+- 测试：US-012 的 OR-Set compaction 测试已覆盖纯函数逻辑；server 层新增集成测试（见 tasks.test.ts）。
+- `npm run verify` 全绿；`npm run demo` 退出码 0；`npm audit --omit=dev` 为 0；`npm run verify:docker` 通过。
+
 ## 2026-11-21 — US-019 Next.js 管理后台
 
 测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19 / web 0 —— Next.js 页面构建成功，无单元测试框架）。

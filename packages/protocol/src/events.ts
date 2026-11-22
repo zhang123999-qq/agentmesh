@@ -74,6 +74,7 @@ export const DOMAIN_ONLY_EVENT_TYPES = [
   'task.status.changed',
   'task.bid.placed',
   'task.progress.reported',
+  'task.compaction.completed',
   // `task.completed` / `task.failed` are notifications (added in US-011).
 ] as const;
 
@@ -287,9 +288,16 @@ export type AccountAuthenticatedPayload = z.infer<
  * map grows as modules land. Reducers still read payloads defensively, so an
  * unlisted (legacy) type never breaks replay.
  */
+export const taskCompactionCompletedPayloadSchema = z.object({
+  compactedTasks: z.number().int().nonnegative(),
+  totalRemoved: z.number().int().nonnegative(),
+  errors: z.array(z.string()).optional(),
+});
+
 export const domainEventPayloadSchemas = {
   'account.registered': accountRegisteredPayloadSchema,
   'account.authenticated': accountAuthenticatedPayloadSchema,
+  'task.compaction.completed': taskCompactionCompletedPayloadSchema,
 } satisfies Partial<Record<EventType, z.ZodTypeAny>>;
 
 export function getDomainEventPayloadSchema(type: string): z.ZodTypeAny | undefined {
