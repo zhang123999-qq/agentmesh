@@ -331,4 +331,29 @@ CAS（version +1）；后续 progress 只原地更新 `tasks.progress`，不碰 
 - 被否决：**SSR 建立 WS**（决策 2）；理由：首屏不需要实时数据，SSR + WS 会导致
   服务端每请求一个连接，无益且难以管理生命周期。
 - 被否决：**按列表独立去重**（决策 3）；理由：同一 seq 在消息列表与事件流
-  同时出现会导致重复渲染，用户体验差；US-010/014 保证 seq 全局唯一。
+  同时出现会导致重复渲染，用户体验差；US-010/014 保证 seq 全局唯一.
+
+
+## US-021B 定时 compaction（4 个决策）
+
+1. **触发方式**：**独立定时器** (`setInterval`)，默认关闭。
+   理由：单机 SQLite 下单一写者，轮询比请求触发更可控；默认关闭避免无谓开销。
+   被否决：请求触发（不确定延迟）、外部 cron（需额外部署、运维复杂度）。
+
+2. **推进逻辑**：在 `withTransaction` 内推进 `stableFrontier`，仅删除
+   `counter <= frontier` 的 tombstone；live add tag 永不删除。
+   与 US-012 `compactOrSet` 不变量对齐：live 集合不变、幂等、可重入。
+
+3. **开关与配置**：env `TASK_BID_COMPACTION_INTERVAL_SECONDS`，默认 0 = 关闭；
+   不新增 RPC（保持 22/22）。可运行时调整：`stopCompactionTimer()` + 新 `startCompactionTimer()`。
+
+4. **失败处理**：单次失败记录日志 + 下周期重试，不自动终止进程；
+   compaction 事件记录 `errors` 字段，`/health` 暴露状态（US-021C 扩展）。
+
+**实现**：
+- 复用 US-012 `compactOrSet` / `compactBids` 纯函数。
+- `TasksService` 新增：`compactTaskBids`、`runCompaction`、`startCompactionTimer` / `stopCompactionTimer`。
+- `app.ts` 启动时按开关注册定时器，`onClose` 清理（与 reclaim 定时器一致）。
+- compaction 完成后写 `task.compaction.completed` domain 事件（含 `compactedTasks` / `totalRemoved` / `errors`）。
+- 默认关闭，避免无谓开销；按需开启（如 `TASK_BID_COMPACTION_INTERVAL_SECONDS=3600`）。
+- `npm run verify` 全绿；`npm run demo` 退出码 0；`npm audit --omit=dev` 为 0；`npm run verify:docker` 通过。
