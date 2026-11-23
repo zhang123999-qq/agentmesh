@@ -27,3 +27,9 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['login', '--secret'])).toThrowError(/requires a value/);
   });
 });
+
+describe('CI self-check (temporary — will be removed)', () => {
+  it('deliberately fails to prove CI is not always-green', () => {
+    expect(1).toBe(2);
+  });
+});
