@@ -43,3 +43,4 @@ demo-output.json
 apps/web/.next/
 apps/web/e2e/test-results/
 apps/web/e2e/playwright-report/
+apps/web/test-results/
