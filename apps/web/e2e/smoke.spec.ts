@@ -62,11 +62,12 @@ test.describe('live stack flow', () => {
     await page.getByRole('link', { name: '频道' }).first().click();
     await expect(page).toHaveURL(/\/dashboard\/channels/);
 
-    // Create a throwaway channel and open it.
+    // Create a throwaway channel and open it (the list item is an <li> with an
+    // onClick, not a button role — click by its name text).
     const channelName = `e2e-${Date.now()}`;
     await page.getByPlaceholder('新频道名称').fill(channelName);
     await page.getByRole('button', { name: '创建频道' }).click();
-    await page.getByRole('button', { name: new RegExp(channelName) }).click();
+    await page.getByText(channelName, { exact: true }).click();
 
     // Send a message and confirm it renders (history + live share one seq key).
     const body = `hello-${Date.now()}`;
