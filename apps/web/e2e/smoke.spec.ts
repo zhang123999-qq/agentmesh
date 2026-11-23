@@ -59,7 +59,7 @@ test.describe('live stack flow', () => {
 
     // Navigate via the in-app link (client-side) — a full page reload would drop
     // the in-memory SDK session (no token is persisted across reloads).
-    await page.getByRole('link', { name: '频道' }).click();
+    await page.getByRole('link', { name: '频道' }).first().click();
     await expect(page).toHaveURL(/\/dashboard\/channels/);
 
     // Create a throwaway channel and open it.
