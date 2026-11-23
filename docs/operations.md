@@ -127,16 +127,23 @@ curl -kf https://localhost:8443/health
 - **JWT_SECRET 轮换**：替换 secret 后重启；所有 token 立即失效，需通知 agent 重新认证。
 - **无 Docker 环境**：`npm run verify:docker` 等价验证 health / migrate / backup。
 
-## M9 运行时签字（阻塞，2026-11-21）
+## M9 运行时签字（**阻塞中**，2026-11-23 复核）
 
-- 尝试 `docker version` / `docker compose version`：本机 Docker 引擎不可用（命令不存在）。
+- `docker version` / `docker compose version`：本机 Docker 引擎**不可用**（命令不存在）；
+  M9 运行时项**未执行、未签字**。不得把“未执行”写成“通过”。
 - 已完成的本地等价验证：`npm run verify:docker` →
-  `{"health":true,"migrate":true,"backup":true,"gracefulShutdown":true,"platform":"win32"}`
-  （Windows 上 SIGTERM 不触发 POSIX 信号，标记为 n/a；真实 Linux 关闭路径未验证）。
-- **未签字**：`docker compose up`、Caddy internal TLS/证书、Linux SIGTERM、
-  容器内 seed-admin、容器卷持久化与恢复演练，均需在具备 Docker 的环境执行。
-- 复现步骤：安装 Docker Engine ≥24 + Compose v2，按本节上方的 Docker 部署命令执行，
-  并用 `docker compose logs server` 检查启动/关闭日志。
+  `{"health":true,"gracefulShutdown":true,"migrate":true,"backup":true,
+  "compactionTimerStarted":true,"compactionTimerCleared":"n/a",
+  "hashChainTimerStarted":true,"hashChainTimerCleared":"n/a","platform":"win32"}`
+  （Windows 上 SIGTERM 不投递，两个 `*Cleared` 如实记 `n/a`；**Linux 上必须为 true**）。
+- 待具备 Docker 环境后执行：`docker compose up`、Caddy internal TLS/证书、**Linux** SIGTERM 优雅关闭
+  （断言退出码、WS 关闭、reclaim/compaction/hashChain 定时器清理均为 true、SQLite 句柄关闭）、
+  容器内 seed-admin、卷持久化与恢复演练、容器内 runtime audit。
+- **Web smoke（M9 第 10 项）复用 US-021G 的 e2e**：`BASE_URL=https://localhost:8443
+  ADMIN_AGENT_ID=... ADMIN_SECRET=... npm run test:e2e -w @agentmesh/web`（需先在目标机
+  `npm i -D @playwright/test -w @agentmesh/web && npx playwright install chromium`）。
+- 复现步骤：安装 Docker Engine ≥24 + Compose v2，按「Docker 部署」执行，并用
+  `docker compose logs server` 检查启动/关闭，断言上述定时器日志与 `/health.hashChain`。
 
 ## token 撤销（US-021D）
 
