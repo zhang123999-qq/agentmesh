@@ -6,7 +6,7 @@ import { AgentMeshClient, type ConnectionStatus, type EventName } from '@agentme
 interface SdkContextValue {
   client: AgentMeshClient | null;
   status: ConnectionStatus;
-  connect: (url: string, token?: string) => Promise<void>;
+  connect: (url: string, token?: string) => Promise<AgentMeshClient>;
   disconnect: () => void;
   isAdmin: boolean;
   agentId: string | null;
@@ -55,11 +55,10 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
     };
   }, [initialUrl, initialToken]);
 
-  const connect = async (url: string, token?: string) => {
-    const client = clientRef.current;
-    if (!client) return;
-    if (client.state !== 'closed') client.close();
-    // Recreate with new URL/token
+  const connect = async (url: string, token?: string): Promise<AgentMeshClient> => {
+    const existing = clientRef.current;
+    if (existing && existing.state !== 'closed') existing.close();
+    // Recreate with new URL/token.
     const newClient = new AgentMeshClient({
       url,
       autoReconnect: true,
@@ -76,6 +75,9 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
       console.error('connect failed', err);
       throw err;
     }
+    // Return the live client so callers authenticate against the NEW socket,
+    // not a stale reference captured before this reconnect.
+    return newClient;
   };
 
   const disconnect = () => {

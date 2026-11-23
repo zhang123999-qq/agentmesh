@@ -38,16 +38,18 @@ export default function LoginPage() {
       // 获取 WebSocket URL
       const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8787/ws';
 
-      await connect(wsUrl);
+      // connect() returns the NEW client; authenticate on it (the context's
+      // `client` is the pre-reconnect reference and would be closed).
+      const active = await connect(wsUrl);
 
-      const result = await client.authenticate({
+      const result = await active.authenticate({
         agentId: agentId.trim(),
         secret: secret.trim(),
       });
 
       if (result.role !== 'admin') {
         showToast('需要 admin 角色才能进入管理后台', 'error');
-        client.close();
+        active.close();
         return;
       }
 

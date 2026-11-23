@@ -32,10 +32,27 @@ test.describe('live stack flow', () => {
   );
 
   test('login → channel → send message → message is visible', async ({ page }) => {
+    page.on('console', (m) => console.log(`[browser:${m.type()}] ${m.text()}`));
+    page.on('pageerror', (e) => console.log(`[pageerror] ${e.message}`));
+    page.on('requestfailed', (r) =>
+      console.log(`[requestfailed] ${r.url()} ${r.failure()?.errorText ?? ''}`),
+    );
+    page.on('websocket', (ws) => {
+      console.log(`[ws] ${ws.url()}`);
+      ws.on('socketerror', (e) => console.log(`[ws error] ${e}`));
+      ws.on('close', () => console.log('[ws closed]'));
+    });
+
     await page.goto('/login');
     await page.getByLabel('Agent ID').fill(adminId as string);
     await page.getByLabel('Secret').fill(adminSecret as string);
     await page.getByRole('button', { name: '登录' }).click();
+
+    // Surface the page's error toast before asserting the redirect.
+    await page.waitForTimeout(1500);
+    if (!page.url().includes('/dashboard')) {
+      console.log('[page body]', (await page.locator('body').innerText()).slice(0, 400));
+    }
 
     // Redirect to the dashboard after a successful admin login.
     await expect(page).toHaveURL(/\/dashboard/);
