@@ -376,3 +376,22 @@ domain-only 事件的 payload 可选字段使用 **`.optional()`**，**不用** 
 domain 事件边界核实结论：`account.registered` / `account.authenticated` **确为 domain-only 事件**
 （在 `DOMAIN_ONLY_EVENT_TYPES` 且不在 `NOTIFICATION_EVENT_TYPES`），报告无误划；不改 schema。
 
+
+## 故障注入回归（US-021B compaction，2026-11-23）
+
+目的：核实 P0 的测试"函数级正确、集成路径断裂"这一盲区——定时 compaction 曾完全空转却全绿。
+对三条关键集成路径做"故意破坏 → 期望测试红 → 恢复"的验证（验证后工作树干净）。
+
+| # | 注入 | 结果 | 命中用例 |
+| --- | --- | --- | --- |
+| 1 | `TaskBidsDao.listTaskIds()` 改为 `return []`（模拟原 `listByTask('')` 恒 0 行） | **红（3 条失败）** | `physically reclaims a tombstone…` / `is idempotent…` / `a scheduled tick writes task.compaction.completed…` |
+| 2 | `compactTaskBids` 的 frontier 计算改回 `bidStableFrontier()`（新旧恒等） | **红（3 条失败）** | 同上三条 |
+| 3 | 移除 `app.ts` onClose 里的 `tasks.stopCompactionTimer()`（定时器未清理） | **红（`cleared=false`，退出码 1）** | 进程内关闭 harness 的 `task.compaction.timer.cleared` 日志断言（与 `verify-local.mjs` 在 Linux 上的断言同源） |
+
+结论：三条路径的现有测试都会变红，**无需补测试**。已修复的集成断言（`tasks.compaction.test.ts`
+的真实回收/幂等/定时 tick 用例 + `verify-local.mjs` 的结构化日志断言）足以捕获同类断裂。
+
+断言边界（诚实记录）：注入 3 若仅注释 `stopCompactionTimer` 内部的 `clearInterval` 而保留其后的
+`.cleared` 日志，则日志断言不会变红——该断言证明"清理路径被执行"，而非"`clearInterval` 本身执行"。
+真实失败模式（onClose 接线被移除 / `stopCompactionTimer` 从未被调用）会被捕获。如需更强保证，
+可再加"定时器对象已置空"的进程内可观测断言（`isCompactionTimerRunning()` 关闭后必须为 false，已有测试覆盖）。
