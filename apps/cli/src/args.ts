@@ -87,7 +87,11 @@ export function parseArgs(argv: readonly string[]): ParsedArgs {
         continue;
       }
       const next = argv[index + 1];
-      if (next === undefined || (next.startsWith('-') && next !== '-')) {
+      // Accept any following token as the value, even one starting with '-':
+      // opaque secrets/tokens are base64url and may begin with '-'. (POSIX
+      // getopt also consumes the next arg for a required-argument option.)
+      // Use the `--flag=value` form to pass a value that looks like a flag.
+      if (next === undefined) {
         throw new UsageError(`flag --${body} requires a value`);
       }
       setFlag(flags, body, next);
