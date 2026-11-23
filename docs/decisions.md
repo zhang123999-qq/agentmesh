@@ -468,7 +468,7 @@ README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → 
 **SDK 公开 API 变更（点名）**：新增 `AgentMeshClient.revokeToken({ targetToken })`，为保持
 “类型化方法覆盖全部 RPC（23/23）”的既有约束。若不需要可回退为 `sendRaw`，但需同步下调覆盖声明。
 
-## US-021E 多租户隔离设计（**待评审**，草案，非锁死）
+## US-021E 多租户隔离设计（草案；**2026-11-23 评审：已锁死，见文末「US-021E 评审结论」**）
 
 > 状态：草案。任何 schema/RPC 变更必须走下列拆分的独立故事，本草案不开代码。
 
@@ -546,3 +546,80 @@ lockfile）；CI e2e job 用 `npm ci` 后 `npm install --no-save @playwright/tes
 + `npx playwright install --with-deps chromium`，从而**不改动已提交的 lockfile**。
 
 **CI 自检**：首次运行全绿后，故意破坏一条测试断言 → 断言 `verify` job 变红 → 恢复（见 changelog）。
+
+## US-021D 撤销持久化决策（复核，2026-11-23）
+
+**结论：保持现状（进程内 LRU），不改 schema。** 撤销是“尽力而为的细粒度补充”，持久性失效靠
+`JWT_SECRET` 轮换。
+
+### 1. 威胁模型与影响
+场景：攻击者窃取 token T（jti=J）→ 管理员 `agent.revokeToken` 撤销 J → 运维重启服务 →
+进程内撤销表清空 → T 在 `exp` 前再次可用。
+- 窗口：`exp`（默认 3600s）内，任意一次重启后直到 T 过期。
+- 风险：**中**（需“已撤销 + 紧接重启 + exp 前攻击”三条件叠加；单机自托管重启频率低）。
+- 缓解：**轮换 `JWT_SECRET` = 全量且持久**失效（重启后仍失效）；缩短 exp 缩小窗口。
+- 判断：怀疑泄露时，轮换 secret 是更持久更强的手段；“撤销”本就不是持久机制。
+  故“重启复活”是**已知边界**，不是遗漏。
+
+### 2. 持久化代价（若未来要做）
+- 表 `revoked_tokens(jti PK, workspace_id, expires_at, revoked_at)`；建议 **v10 独立迁移**
+  （不与 US-022 的 v9 合并以免耦合；若多租户先落地则带 `workspace_id`）。
+- 鉴权路径：`TokenService.verify` 每请求命中撤销表 → 每次鉴权一次 DB 读；需内存缓存（短 TTL/LRU）。
+- 事件：本实现**不写 domain 事件**（安全动作，结构化日志足矣）；若审计需要 `token.revoked` domain
+  事件 → registry 样本 + 契约测试 + handler 集成测试 + 故障注入。
+- 备份/恢复：撤销表随库备份、恢复后仍生效（这正是持久化目的）。
+
+### 3. 替代方案（含被否决理由）
+| 方案 | 结论 | 理由 |
+| --- | --- | --- |
+| 保持现状 + 缩短 exp（可选） | **采纳** | MVP 单实例、重启少；缩短 exp 零成本缩窗 |
+| 持久化到 SQLite（v10） | 否决（本周期） | 增迁移 + 每请求 DB 读；当前无驱动；易与 US-022 耦合 |
+| 外部存储（Redis） | 否决 | 单机不引外部依赖；多实例时重评 |
+| 只存“撤销时间戳 + 游标” | 否决 | 语义不等价逐 token 撤销，恢复粒度粗 |
+| 缩短 exp + refresh 重鉴权 | 否决 | 仍需凭据；不能替代“管理员主动撤销某 token” |
+
+### 4. 复审条件
+多实例部署 / 客户或合规要求“撤销跨重启生效” / US-021E 多租户落地。届时独立 v10 迁移 +
+内存缓存，不改 JWT payload 字段（jti 已存在）。
+
+### 与 US-021E 的交互
+当前撤销**不按 workspace 隔离**（jti 全局）。多租户落地后：撤销记录带 `workspace_id`，只能撤销
+**本 workspace** 的 token（跨租户 -32002/-32004）；多租户 + 多实例会同时触发“持久化 + 隔离”。
+
+## US-021E 评审结论（2026-11-23，**已锁死**）
+
+**结论：草案可接受，锁死。** 附 23 RPC 归属表、冲突检查、拆分独立性、与 US-021D 交互。
+
+### 与已锁死决策的冲突检查
+| 已锁死项 | 结论 | 说明 |
+| --- | --- | --- |
+| seq 全局唯一 | 兼容 | seq 仍全局（单 events 表）；resume/history 读取按 workspace 过滤，seq 空间不变 |
+| 任务归属 CAS | 兼容 | workspace 取自 token；他租户任务表现为 -32004（不泄露存在性） |
+| system.subscribe | 兼容 | per-session 不变；workspace 取自 token；跨租户订阅不可达 |
+| presence LWW | 需调整（US-024） | 内存 presence 按 workspace 分片；广播按租户过滤 |
+| US-021D 撤销 | 需调整（US-023/未来） | 撤销记录加 workspace_id，撤销限本租户 |
+
+### 23 个 RPC 归属表（统一从 token 推断，不新增 workspaceId 参数）
+| 方法 | workspace 来源 | 跨租户错误码 |
+| --- | --- | --- |
+| agent.register | 无 token → `default`（多租户注册延后） | n/a |
+| agent.authenticate | 账号所属 workspace | -32004 |
+| agent.list | token claim | -32004 |
+| agent.revokeToken | token claim（目标 token 须同租户） | -32002 |
+| channel.create/join/leave/list | token claim | -32004 |
+| message.send/history | token claim | -32004 |
+| task.publish/list/get/bid/bids/award/progress/complete/fail/review/reassign/cancel | token claim | -32004 |
+| system.subscribe | token claim | -32002 |
+
+越权错误码：读/资源类 **-32004**（避免探测），动作/角色类 **-32002**，一致。
+
+### 拆分独立性
+- **US-022（schema+backfill）单独安全**：加 `workspace_id` 列 + `workspaces` 表 + 回填 `default`；
+  代码仍用常量 `default`，行为不变 → 可独立上线。
+- **US-023（RPC 鉴权）** 依赖 US-022 列；US-022 后、US-023 前系统仍“全 default”，安全。
+- **US-024（presence+Web）** 依赖 US-023；**US-025（运维）** 依赖前三者。
+- 回滚：v9/v10 迁移**前向不可逆**，“回滚”= 从备份恢复（记入 operations.md）。
+- 结论：**拆分成立**；唯一限制是迁移前向不可逆，须先备份。
+
+### 与 US-021D 交互
+撤销在多租户下按 workspace 隔离；持久化 + 隔离在 US-022/023 一起评估，本评审不夹带实现。

@@ -202,9 +202,9 @@ US-018 的关键语义：
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
 | `system.subscribe` | **US-020 完成** | admin opt-in domain-only 事件；现有 notification 广播不变；Web 默认只用 SDK `on()` |
-| 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
+| 单 workspace 债务（reclaim/register/presence 固定 default） | **已决策：US-021E 已锁死（2026-11-23）** | 实施拆 US-022（schema）/023（RPC 鉴权）/024（presence+Web）/025（运维）；迁移前向不可逆须先备份 |
 | 哈希链无外部锚定（US-021C 已可定期校验） | US-022+ | 链尾篡改不可检测；运行时已能告警 mismatch |
-| token 撤销无持久化（US-021D 完成，仅进程内） | US-022+ | 重启后已撤销 token 在 `exp` 前复活；整集失效靠轮换 secret |
+| token 撤销无持久化（US-021D 完成，仅进程内） | **已决策：保持进程内（2026-11-23）** | 重启后已撤销 token 在 `exp` 前复活；复审条件（多实例/合规/多租户）见 decisions.md |
 | SQLite 明文（US-021F 复核：仍不做，复审条件已记） | US-022+ | 依赖 OS/卷加密；触发条件见 decisions.md |
 | CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |
 
