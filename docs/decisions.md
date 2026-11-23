@@ -521,3 +521,28 @@ README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → 
    （链是对明文 canonical JSON 的 SHA-256，加密在存储层）。
 5. **结论**：**仍不做**。复审条件：上云托管 / 客户合规要求静态加密 / US-021E 多租户落地 /
    安全审计提出。届时按 US-022+ 单列，不夹带进其他故事。
+
+## CI（GitHub Actions）5 个决策
+
+1. **触发**：`push` to main + `pull_request` + 每日 `schedule`（06:17 UTC，捕捉新 CVE）+
+   `workflow_dispatch` 全开。
+2. **Job 拆分**：
+   - `verify`（**required**）：`npm ci` → `npm run verify` → 两条 audit（all / omit=dev）→
+     `npm run demo`（与本地四项门槛逐项一致，不精简）。
+   - `web-e2e`（**required**）：装 Playwright + chromium，起本地栈（build + seed-admin +
+     server + `next start`）跑 e2e。
+   - `docker`（**required**）：`verify:docker`（Linux runner 天然支持 SIGTERM，断言两个
+     `*Cleared` 为 true）。
+   - `audit-cron`（**advisory**）：仅定时触发，额外跑全量 audit（含 dev），失败通知不阻塞 PR。
+3. **Node 版本**：单一 `22`（LTS，满足 engines>=22 与 vite 8/vitest 5 要求）；不做矩阵。
+4. **缓存**：`actions/setup-node` 的 `cache: npm`；Playwright 浏览器缓存 `~/.cache/ms-playwright`，
+   key 含 `@playwright/test` 版本；不缓存 `node_modules`（`npm ci` 更干净）。
+5. **e2e 环境**：方案 A（轻量）：同一 job 内 build → `seed-admin`（解析 agentId/secret）→
+   后台起 server(8787) 与 `next start`(3000) → 轮询 `/health` 与 `/login` → `playwright test`。
+   DB 用 `$RUNNER_TEMP` 临时 SQLite，job 结束即清理。方案 B（compose 全栈 + BASE_URL）留给 M9 签字。
+
+**Playwright 依赖策略**：`package.json` 不新增 `@playwright/test`（本地 npm arborist 缺陷无法生成
+lockfile）；CI e2e job 用 `npm ci` 后 `npm install --no-save @playwright/test -w @agentmesh/web`
++ `npx playwright install --with-deps chromium`，从而**不改动已提交的 lockfile**。
+
+**CI 自检**：首次运行全绿后，故意破坏一条测试断言 → 断言 `verify` job 变红 → 恢复（见 changelog）。

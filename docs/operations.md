@@ -155,3 +155,12 @@ curl -kf https://localhost:8443/health
   ```ts
   await adminClient.revokeToken({ targetToken: compromisedToken });
   ```
+
+## CI 与 M9 的关系
+
+- CI（`.github/workflows/ci.yml`）通过 **不等于** M9 签字。CI 的 `web-e2e` 在 GitHub runner 上起
+  真实本地栈跑通浏览器路径，可作 M9 第 10 项（Web smoke）的**部分**证据；`docker.yml` 的
+  `verify:docker` 在 Linux 上证明 SIGTERM 清理两个定时器（可作 M9 第 6 项部分证据）。
+- **M9 仍需要真实 Docker 环境**：`docker compose up` + Caddy TLS + 容器内 seed-admin + 卷恢复 +
+  在容器/Caddy origin 上跑 e2e（BASE_URL）——这些 CI 默认 job 不覆盖，须人工在 Docker 环境执行并签字。
+- 失败排查：CI badge → Actions 运行日志；本地复现命令见 README「持续集成（CI）」。

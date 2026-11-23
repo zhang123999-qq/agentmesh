@@ -2,6 +2,20 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — CI（GitHub Actions）
+
+测试基线：**569**（不变；本故事只加 CI 与文档）。
+
+- 新增 `.github/workflows/ci.yml`：`verify`（npm ci + npm run verify + 两条 audit + demo，
+  required）、`web-e2e`（Playwright `--no-save` 安装 + chromium + 真实本地栈 e2e，required）、
+  `audit-cron`（每日全量 audit，advisory）。触发：push / PR / cron / workflow_dispatch。
+- 新增 `.github/workflows/docker.yml`：`verify:docker`（Linux 断言
+  `compactionTimerCleared` / `hashChainTimerCleared` 为 true）。
+- Playwright 依赖策略：不改 `package.json`/lockfile（本地 npm arborist 缺陷无法重生成 lock），
+  CI 内 `npm install --no-save @playwright/test -w @agentmesh/web`。
+- README 加 CI badge、本地复现说明、CI≠M9 边界；operations.md 加「CI 与 M9 的关系」。
+- **CI 自检**：首次运行全绿后，故意破坏一条测试断言验证 `verify` job 变红，恢复后全绿（运行记录见 Actions）。
+
 ## 2026-11-23 — US-021D token 撤销
 
 测试基线：**569**（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 19 / web 11）。

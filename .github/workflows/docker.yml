@@ -1,0 +1,33 @@
+name: Docker (Linux)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-docker:
+    name: verify:docker (real Linux SIGTERM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # On Linux the SIGTERM handler actually runs, so the graceful-shutdown
+      # timer clears must be `true` (not the Windows "n/a"). Assert them explicitly.
+      - name: verify:docker
+        run: |
+          set -euo pipefail
+          OUT="$(node docker/verify-local.mjs)"
+          echo "$OUT"
+          echo "$OUT" | grep -q '"gracefulShutdown":true'
+          echo "$OUT" | grep -q '"compactionTimerCleared":true'
+          echo "$OUT" | grep -q '"hashChainTimerCleared":true'
