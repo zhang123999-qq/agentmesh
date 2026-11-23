@@ -56,7 +56,7 @@ jobs:
       - name: Build (embed WS url for the web bundle)
         run: npm run build
         env:
-          NEXT_PUBLIC_WS_URL: ws://localhost:8787/ws
+          NEXT_PUBLIC_WS_URL: ws://localhost:18931/ws
       - name: Run e2e against a real local stack
         run: |
           set -euo pipefail
@@ -65,7 +65,7 @@ jobs:
           export JWT_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
           export ALLOWED_ORIGINS="http://localhost:3000"
           export HOST=127.0.0.1
-          export PORT=8787
+          export PORT=18931
           export LOG_LEVEL=warn
 
           node apps/server/dist/cli/migrate.js --db "$DB_PATH" >/dev/null
@@ -95,7 +95,7 @@ jobs:
           sleep 3
           echo "--- server.log (startup) ---"; cat "$RUNNER_TEMP/server.log" 2>/dev/null || true
           echo "--- web.log (startup) ---"; cat "$RUNNER_TEMP/web.log" 2>/dev/null || true
-          wait_url http://127.0.0.1:8787/health
+          wait_url http://127.0.0.1:18931/health
           wait_url http://127.0.0.1:3000/login
 
           BASE_URL=http://localhost:3000 \
