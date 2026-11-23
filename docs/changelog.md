@@ -16,6 +16,26 @@
 - README 加 CI badge、本地复现说明、CI≠M9 边界；operations.md 加「CI 与 M9 的关系」。
 - **CI 自检**：首次运行全绿后，故意破坏一条测试断言验证 `verify` job 变红，恢复后全绿（运行记录见 Actions）。
 
+### CI 首次运行暴露并修复的真实缺陷（均独立 fix: 提交）
+
+- `fix: build packages in dependency order`：全新 checkout 下 `npm run build` 用 `--workspaces`
+  非拓扑序，`adapters`/`mock-agents`/`web` 先于 `@agentmesh/sdk` 编译（TS2307）；本地旧 dist 掩盖。
+  改为显式拓扑序 + `verify` 先 `npm test`（构建）再 typecheck。
+- `fix: CLI accepts flag values starting with '-'`：base64url secret 可能以 `-` 开头，`parseArgs`
+  误判为 flag → `login` 退出 2（CI 偶发红的真因）。
+- `fix: web login authenticates on the reconnected client`：provider `connect()` 新建 client，但登录页
+  仍用旧引用 `authenticate`（挂在已关闭 socket）。US-019 仅 build，从未被浏览器验证。
+- `fix: set admin session after web login`：provider `isAdmin` 从不置 true，仪表盘一直显示“请先登录”、
+  不渲染导航。
+- e2e 侧：runner 占用常见端口 → 改用 OS 分配的动态端口；channel 列表项是 `<li>` 非 button；
+  频道导航链接有重名 → `.first()`；登录后须客户端导航（整页刷新丢失内存会话）。
+
+### CI 自检结果
+
+- 注入一条必然失败的断言（`3523044`）→ `verify` job **failure**、`web e2e` **success**（证明 CI 会真红，
+  不是恒绿装饰）。
+- 移除注入后（本轮提交）→ `verify` / `web e2e` / `docker` 全 **success**。
+
 ## 2026-11-23 — US-021D token 撤销
 
 测试基线：**569**（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 19 / web 11）。
