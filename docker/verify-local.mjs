@@ -22,7 +22,21 @@ const port = 18887;
 const dbPath = join(temp, 'agentmesh.db');
 const freshDb = join(temp, 'fresh.db');
 const backupPath = join(temp, 'backup.db');
-const result = { health: false, gracefulShutdown: false, migrate: false, backup: false };
+const result = {
+  health: false,
+  gracefulShutdown: false,
+  migrate: false,
+  backup: false,
+  compactionTimerStarted: false,
+  compactionTimerCleared: false,
+};
+/**
+ * Captured child stdout+stderr. The compaction timer start/clear is asserted
+ * from explicit structured log lines (`task.compaction.timer.started` /
+ * `task.compaction.timer.cleared`), never inferred from the exit code — a
+ * swallowed error or a missing clear would otherwise look like "pass".
+ */
+let serverLogs = '';
 
 const runNode = (args) =>
   spawnSync(process.execPath, args, { cwd: root, encoding: 'utf8' });
@@ -55,9 +69,19 @@ try {
       DB_PATH: dbPath,
       JWT_SECRET: '0123456789abcdef0123456789abcdef',
       ALLOWED_ORIGINS: 'https://localhost',
-      LOG_LEVEL: 'silent',
+      LOG_LEVEL: 'info',
+      TASK_BID_COMPACTION_INTERVAL_SECONDS: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  // Drain the pipes into a buffer; also proves the process is emitting the
+  // structured timer logs we assert on below.
+  child.stdout.on('data', (chunk) => {
+    serverLogs += String(chunk);
+  });
+  child.stderr.on('data', (chunk) => {
+    serverLogs += String(chunk);
   });
 
   for (let i = 0; i < 100; i += 1) {
@@ -75,9 +99,14 @@ try {
   if (!result.health) throw new Error('GET /health did not return 200');
   if (!existsSync(dbPath)) throw new Error('server did not create DB_PATH');
 
+  // Wait a bit for compaction timer to trigger at least once
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, 2000));
+
   const exit = await new Promise((resolveExit) => {
     const timer = setTimeout(() => resolveExit({ code: null, timeout: true }), 10_000);
-    child.once('exit', (code, signal) => {
+    // `close` (not `exit`) fires after the piped stdout/stderr are fully
+    // drained, so the captured `serverLogs` buffer is complete when we assert.
+    child.once('close', (code, signal) => {
       clearTimeout(timer);
       resolveExit({ code, signal, timeout: false });
     });
@@ -87,6 +116,29 @@ try {
     process.platform === 'win32' ? true : exit.code === 0 && exit.timeout === false;
   if (!result.gracefulShutdown) {
     throw new Error(`SIGTERM exit was not graceful: ${JSON.stringify(exit)}`);
+  }
+
+  // Explicit timer assertions from the structured log stream (never inferred
+  // from the exit code — see the US-021B P1 verification).
+  result.compactionTimerStarted = serverLogs.includes('task.compaction.timer.started');
+  if (!result.compactionTimerStarted) {
+    throw new Error(
+      'compaction timer never started despite TASK_BID_COMPACTION_INTERVAL_SECONDS=1 ' +
+        '(no task.compaction.timer.started log)',
+    );
+  }
+  if (process.platform === 'win32') {
+    // Windows cannot deliver SIGTERM to run graceful-shutdown handlers, so the
+    // clear is unobservable here. Report `n/a` honestly (manual Linux step in
+    // operations.md) instead of pretending "true".
+    result.compactionTimerCleared = 'n/a';
+  } else {
+    result.compactionTimerCleared = serverLogs.includes('task.compaction.timer.cleared');
+    if (result.compactionTimerCleared !== true) {
+      throw new Error(
+        'compaction timer was not cleared on SIGTERM (no task.compaction.timer.cleared log)',
+      );
+    }
   }
 
   const backup = runNode([
