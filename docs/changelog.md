@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-021C 事件哈希链定期校验 + 告警
+
+测试基线：**564**（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 282 / cli 19 / web 11）。
+
+- core：`verifyEventChainBatched(loadBatch, {batchSize})` + `EventStore.verifyChain()`：分批读，
+  返回第一个不一致的 `seq`+`aggregateId`（大库不 OOM）。新增 3 条测试（正常 / 篡改 / 跨批边界）。
+- server：新增 `HashChainMonitor`：启动时一次 + 定时（`HASH_CHAIN_VERIFY_INTERVAL_SECONDS` 默认 3600，
+  0 关闭；`HASH_CHAIN_VERIFY_ON_STARTUP` 默认 true）。`/health` 增加 `hashChain: ok|mismatch|unchecked`，
+  不暴露 payload/secret。定时器 `unref()` + `onClose` 清理，输出 `hashchain.timer.started/cleared`。
+- 集成测试（4）：正常 ok + `/health`；篡改后 state 与 `/health` 变 `mismatch`（seq+aggregateId）；
+  **定时器真的重校验**（tamper 后周期内 `/health` 变 mismatch）；interval=0 不启定时（启动校验仍跑）。
+- `verify:docker` 新增 `hashChainTimerStarted` / `hashChainTimerCleared` 结构化日志断言（Windows n/a）。
+- 故障注入自检：把定时器 tick 改成不调用 `runCheck` → “periodic timer actually re-verifies” 变红，恢复后全绿。
+- 回归：`npm run verify` / `audit`×2 / `demo` / `verify:docker` 全过。
+
 ## 2026-11-23 — US-021G Web 测试基线
 
 测试基线：**557**（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19 / **web 11**）。

@@ -76,8 +76,22 @@ DB_PATH=data/agentmesh.db \
 
 ## 健康检查
 
-`GET /health` 返回 `status/version/protocolVersion/uptime/nodeEnv/timestamp`。
+`GET /health` 返回 `status/version/protocolVersion/uptime/nodeEnv/timestamp/hashChain`。
 WS 有心跳：一个 interval 未回 pong 的 socket 会被 `terminate()`。
+
+### 哈希链完整性（US-021C）
+
+- `/health.hashChain` 取值：`ok`（最近一次校验通过）/ `mismatch`（发现不一致或校验异常）/
+  `unchecked`（尚未校验）。**不暴露**任何事件 payload 或 secret，仅状态。
+- 校验时机：启动时一次 + 定时（`HASH_CHAIN_VERIFY_INTERVAL_SECONDS`，默认 `3600` 秒，`0` 关闭定时；
+  `HASH_CHAIN_VERIFY_ON_STARTUP` 默认 `true`）。
+- 结构化日志：`hashchain.verify.ok` / `hashchain.verify.mismatch`（含 `seq` + `aggregateId`）/
+  `hashchain.timer.started` / `hashchain.timer.cleared`。
+- **发现 mismatch 时**：服务不阻断、不停止写入（本地库可能被手动修改）。运维应：
+  1) 看日志定位 `seq` + `aggregateId`；2) 从可信备份恢复（见「备份与恢复」）；
+  3) 排查手动改库来源。链尾事件被篡改无法检测（无外部锚定，US-022+）。
+- `verify:docker` 显式断言 `hashChainTimerStarted` / `hashChainTimerCleared`（Windows 记 `n/a`，
+  Linux 必须为 true）。
 
 ## Docker 部署（US-018）
 

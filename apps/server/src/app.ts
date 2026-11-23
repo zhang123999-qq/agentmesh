@@ -49,6 +49,7 @@ import {
   type TasksService,
 } from './modules/tasks.js';
 import { registerSystemModule } from './modules/system.js';
+import { HashChainMonitor } from './modules/hash-chain.js';
 import { createHandlerRegistry, type HandlerRegistry } from './registry.js';
 import { WsGateway, type WsGatewayOptions } from './ws/gateway.js';
 
@@ -139,6 +140,8 @@ declare module 'fastify' {
     channels?: ChannelsService;
     /** Task lifecycle service, present when the US-008 module is registered. */
     tasks?: TasksService;
+    /** Event hash-chain monitor, present when a store is wired (US-021C). */
+    hashChain?: HashChainMonitor;
     /** WebSocket gateway, present when a store is wired. */
     ws?: WsGateway;
   }
@@ -358,6 +361,27 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     }
   }
 
+  // Event hash-chain verification (US-021C): once on startup + optional timer.
+  // Never blocks startup on failure; /health exposes ok | mismatch | unchecked.
+  if (store !== undefined) {
+    const hashChainEvents = new EventStore(
+      store.db,
+      { workspaceId: 'default' },
+      store.repos.events,
+    );
+    const hashChain = new HashChainMonitor(hashChainEvents, logger);
+    if (config.hashChainVerifyOnStartup) {
+      hashChain.runCheck();
+    }
+    if (config.hashChainVerifyIntervalSeconds > 0) {
+      hashChain.startTimer(config.hashChainVerifyIntervalSeconds * 1000);
+      app.addHook('onClose', async () => {
+        hashChain.stopTimer();
+      });
+    }
+    app.decorate('hashChain', hashChain);
+  }
+
   const uptime = options.uptime ?? defaultUptime;
 
   app.get('/health', async (_request, reply) => {
@@ -369,6 +393,8 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       uptime: Math.round(uptime() * 1000) / 1000,
       nodeEnv: config.nodeEnv,
       timestamp: new Date().toISOString(),
+      // US-021C: coarse integrity state; never payloads or secrets.
+      hashChain: app.hashChain?.state.status ?? 'unchecked',
     };
   });
 

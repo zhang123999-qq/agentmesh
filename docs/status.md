@@ -20,10 +20,15 @@
 | US-020 | **完成（本地验证）** | `system.subscribe`：admin opt-in domain events，per-session 订阅，RPC 22/22 |
 | US-021B | **完成（本地验证，P1 已核实并修复空转 bug）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理；`verify:docker` 显式断言定时器 start/clear |
 | US-021G | **完成（本地验证，e2e 未执行）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本就绪（供 M9 复用），因 npm arborist 缺陷 + 无浏览器未在本机执行 |
-| US-021C…US-021F | 未开始 | 技术债归口 |
+| US-021C | **完成（本地验证）** | 事件哈希链定期校验：分批 verify、启动一次 + 定时（默认 1h）、`/health.hashChain`、verify:docker 定时器断言 |
+| US-021D…US-021F | 未开始 | 技术债归口 |
 
-测试基线：**557**
-（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19 / **web 11**）。
+测试基线：**564**
+（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 282 / cli 19 / **web 11**）。
+
+> US-021C 事件哈希链校验（2026-11-23）：`verifyEventChainBatched` + `EventStore.verifyChain()`（分批、
+> 返回 seq+aggregateId）；server 启动一次 + 定时（默认 1h）；`/health.hashChain`；`verify:docker`
+> 断言 `hashChainTimerStarted/Cleared`。
 
 > US-021G Web 测试基线（2026-11-23）：web `test` 改为 `vitest run` 纳入根 verify（单元 7 + 集成 4）；
 > e2e 脚本已就绪（BASE_URL 参数化，供 M9 复用）但未在本机执行（npm arborist 缺陷 + 无浏览器/栈）。
@@ -190,7 +195,7 @@ US-018 的关键语义：
 | --- | --- | --- |
 | `system.subscribe` | **US-020 完成** | admin opt-in domain-only 事件；现有 notification 广播不变；Web 默认只用 SDK `on()` |
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
-| 哈希链只写不验 | US-022+ | 不能作为运行时防篡改保证 |
+| 哈希链无外部锚定（US-021C 已可定期校验） | US-022+ | 链尾篡改不可检测；运行时已能告警 mismatch |
 | 无 token 撤销 | US-022+ | 泄露 token 在 `exp` 前有效 |
 | SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
 | CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |

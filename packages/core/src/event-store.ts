@@ -24,9 +24,11 @@ import {
 
 import {
   type AppendEventRequest,
+  type ChainVerificationDetailed,
   type CoreEvent,
   hashEvent,
   toCoreEvent,
+  verifyEventChainBatched,
 } from './envelope.js';
 
 export interface EventStoreOptions {
@@ -180,6 +182,21 @@ export class EventStore {
 
   count(workspaceId: string = this.workspaceId): number {
     return this.events.count({ workspaceId });
+  }
+
+  /**
+   * Verify the workspace's hash chain in bounded batches (US-021C). Reads pages
+   * via {@link readAfter} so a large log never loads into memory; returns the
+   * first broken link by `seq` + `aggregateId`.
+   */
+  verifyChain(
+    options: { batchSize?: number } = {},
+    workspaceId: string = this.workspaceId,
+  ): ChainVerificationDetailed {
+    return verifyEventChainBatched(
+      (afterSeq, limit) => this.readAfter(afterSeq, limit, workspaceId),
+      options,
+    );
   }
 
   /** Escape hatch for callers that need the raw DAO (e.g. projections). */

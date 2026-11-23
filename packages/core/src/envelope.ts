@@ -185,6 +185,79 @@ export function verifyEventChain(events: readonly HashableEvent[]): ChainVerific
   return { valid: true };
 }
 
+/** Details of the first broken link in a hash chain (US-021C). */
+export interface ChainMismatch {
+  /** seq of the first event whose `prevHash` does not match its predecessor. */
+  seq: number;
+  aggregateId: string;
+  expectedPrevHash: string;
+  actualPrevHash: string | null;
+}
+
+export interface ChainVerificationDetailed {
+  valid: boolean;
+  /** Number of events examined. */
+  checked: number;
+  mismatch?: ChainMismatch;
+}
+
+/**
+ * Batched hash-chain verification (US-021C) — never holds the whole log in
+ * memory. `loadBatch(afterSeq, limit)` must return the next events with
+ * `seq > afterSeq` in ascending seq order (e.g. `EventStore.readAfter`).
+ *
+ * The returned `mismatch` identifies the first broken link by `seq` and
+ * `aggregateId` (not just an array index), so an operator can locate and repair
+ * the offending row. Links are only checked between globally consecutive events
+ * and where `prevHash` is present, mirroring {@link verifyEventChain}.
+ */
+export function verifyEventChainBatched(
+  loadBatch: (afterSeq: number, limit: number) => readonly HashableEvent[],
+  options: { batchSize?: number } = {},
+): ChainVerificationDetailed {
+  const batchSize = Math.max(1, options.batchSize ?? 1000);
+  let previous: HashableEvent | undefined;
+  let afterSeq = 0;
+  let checked = 0;
+
+  for (;;) {
+    const batch = loadBatch(afterSeq, batchSize);
+    if (batch.length === 0) break;
+
+    for (const current of batch) {
+      checked += 1;
+      if (
+        previous !== undefined &&
+        current.seq === previous.seq + 1 &&
+        current.prevHash !== undefined &&
+        current.prevHash !== null
+      ) {
+        const expectedPrevHash = hashEvent(previous);
+        if (current.prevHash !== expectedPrevHash) {
+          return {
+            valid: false,
+            checked,
+            mismatch: {
+              seq: current.seq,
+              aggregateId: current.aggregateId,
+              expectedPrevHash,
+              actualPrevHash: current.prevHash,
+            },
+          };
+        }
+      }
+      previous = current;
+    }
+
+    const last = batch[batch.length - 1];
+    if (last === undefined) break;
+    afterSeq = last.seq;
+    if (batch.length < batchSize) break;
+  }
+
+  return { valid: true, checked };
+}
+
 // ---------------------------------------------------------------------------
 // Mapping from the persistence row to the envelope
 // ---------------------------------------------------------------------------

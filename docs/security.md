@@ -7,7 +7,7 @@
 | 访问令牌 | HS256（HMAC-SHA256，jose） | **签名**，不是加密 |
 | 账号 secret | `crypto.randomBytes(32)` → Base64URL（256 bit） | CSPRNG |
 | 账号 secret 存储 | SHA-256 十六进制摘要 + `timingSafeEqual` | 单向哈希 |
-| 事件哈希链 | SHA-256 over canonical JSON | 审计预留，未强制验证 |
+| 事件哈希链 | SHA-256 over canonical JSON | 定期校验（US-021C，无外部锚定） |
 | ID / epoch / reqId | `crypto.randomUUID()` | UUID v4 |
 
 **没有**：AES/RSA、密码 KDF（bcrypt/scrypt/argon2）、SQLCipher、Node 层 HTTPS。
@@ -68,8 +68,10 @@
   加密时使用 `better-sqlite3-multiple-ciphers`（SQLCipher 兼容），列为 US-022+。
 - `account.registered` 事件含 `secretHash`（不可逆摘要）。事件日志的访问控制必须
   至少与 `accounts` 表同级；未来公开事件 API 必须过滤该字段。
-- `prevHash` 只写不验，不能当成运行时防篡改保证；生产需要定期 `verifyEventChain`
-  + 外部锚定。
+- `prevHash` 现已可验证（US-021C）：`EventStore.verifyChain()` 分批校验，服务端启动时一次 +
+  定时（`HASH_CHAIN_VERIFY_INTERVAL_SECONDS`，默认 1h，0 关闭），结果经 `/health.hashChain`
+  （`ok | mismatch | unchecked`）与结构化日志告警。**边界**：仍无外部锚定，链尾事件被篡改
+  无法检测；mismatch 只暴露 `seq` + `aggregateId`，不含 payload/secret。外部锚定列为 US-022+。
 
 ## 依赖
 

@@ -29,12 +29,15 @@ const result = {
   backup: false,
   compactionTimerStarted: false,
   compactionTimerCleared: false,
+  hashChainTimerStarted: false,
+  hashChainTimerCleared: false,
 };
 /**
- * Captured child stdout+stderr. The compaction timer start/clear is asserted
- * from explicit structured log lines (`task.compaction.timer.started` /
- * `task.compaction.timer.cleared`), never inferred from the exit code — a
- * swallowed error or a missing clear would otherwise look like "pass".
+ * Captured child stdout+stderr. The compaction and hash-chain timer
+ * start/clear states are asserted from explicit structured log lines
+ * (`task.compaction.timer.*`, `hashchain.timer.*`), never inferred from the
+ * exit code — a swallowed error or a missing clear would otherwise look like
+ * "pass".
  */
 let serverLogs = '';
 
@@ -137,6 +140,22 @@ try {
     if (result.compactionTimerCleared !== true) {
       throw new Error(
         'compaction timer was not cleared on SIGTERM (no task.compaction.timer.cleared log)',
+      );
+    }
+  }
+
+  // US-021C: hash-chain verification timer lifecycle (startup + periodic).
+  result.hashChainTimerStarted = serverLogs.includes('hashchain.timer.started');
+  if (!result.hashChainTimerStarted) {
+    throw new Error('hash-chain timer never started (no hashchain.timer.started log)');
+  }
+  if (process.platform === 'win32') {
+    result.hashChainTimerCleared = 'n/a';
+  } else {
+    result.hashChainTimerCleared = serverLogs.includes('hashchain.timer.cleared');
+    if (result.hashChainTimerCleared !== true) {
+      throw new Error(
+        'hash-chain timer was not cleared on SIGTERM (no hashchain.timer.cleared log)',
       );
     }
   }

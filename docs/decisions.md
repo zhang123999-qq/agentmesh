@@ -417,3 +417,26 @@ domain 事件边界核实结论：`account.registered` / `account.authenticated`
 失败，且本机无浏览器/无运行栈，故 e2e **已编写但未在本机执行**（脚本+配置齐全，M9 具备环境后按
 README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → seq-registry 单测 2 条 + 集成去重 1 条
 变红，恢复后全绿。
+
+## US-021C 事件哈希链定期校验（4 个决策）
+
+1. **校验时机**：**启动时一次 + 定时**（默认 1h）。理由：启动即暴露明显篡改，定时发现运行期
+   篡改。被否决：仅启动（长时间运行后无人复查）；仅定时（首检延迟 1h）。
+2. **失败行为**：**仅告警 + `/health` 标记不健康（mismatch）**，不阻断写入/启动。理由：本地
+   单机库可能被手动修改，阻断会让运维无法修复。被否决：阻断写入/阻断启动（会把运维锁死）。
+3. **告警通道**：**pino 结构化字段 + `/health`**（`hashChain: ok | mismatch | unchecked`），
+   只暴露 `status/checked/lastCheckedAt/mismatch{seq,aggregateId}`，**不含 payload/secret**。
+   被否决：仅日志（健康探针看不到）。
+4. **外部锚定**：本故事**不做**（US-022 候选），只做“能校验 + 能告警”。被否决：链尾外部锚定
+   （需额外可信存储，超出 MVP）。
+
+**实现**：
+- core 新增 `verifyEventChainBatched(loadBatch, {batchSize})` 与 `EventStore.verifyChain()`（分批读，
+  返回第一个不一致的 `seq` + `aggregateId`，大库不 OOM）。
+- server 新增 `HashChainMonitor`：启动一次 + 定时；env `HASH_CHAIN_VERIFY_ON_STARTUP`（默认 true）、
+  `HASH_CHAIN_VERIFY_INTERVAL_SECONDS`（默认 3600，0 关闭）。
+- 定时器 `unref()` + `onClose` 清理，输出 `hashchain.timer.started` / `hashchain.timer.cleared`；
+  `verify:docker` 的 JSON 报告新增 `hashChainTimerStarted` / `hashChainTimerCleared`（Windows n/a）。
+- `/health` 增加 `hashChain` 字段，不暴露 payload/secret。
+- 故障注入自检：把定时器 tick 改成不调用 `runCheck` → “periodic timer actually re-verifies”
+  集成用例变红，恢复后全绿（避开 US-021B 的空转陷阱）。

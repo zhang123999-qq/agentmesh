@@ -105,6 +105,10 @@ export const MAX_TASK_OPEN_TTL_SECONDS = 60 * 60 * 24 * 30; // 30 days
 export const DEFAULT_TASK_RECLAIM_INTERVAL_SECONDS = 60;
 /** Compaction interval (seconds); 0 = disabled. */
 export const DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS = 0;
+/** Run a hash-chain verification once at startup (US-021C). */
+export const DEFAULT_HASH_CHAIN_VERIFY_ON_STARTUP = true;
+/** Periodic hash-chain verification interval (seconds); 0 disables the timer. */
+export const DEFAULT_HASH_CHAIN_VERIFY_INTERVAL_SECONDS = 3600;
 
 export const LOG_LEVELS = [
   'fatal',
@@ -177,6 +181,10 @@ export interface ServerConfig {
   readonly taskReclaimIntervalSeconds: number;
   /** Compaction interval (seconds) of the bid set compaction timer; 0 = disabled. */
   readonly taskBidCompactionIntervalSeconds: number;
+  /** Run a hash-chain verification once on startup (US-021C). */
+  readonly hashChainVerifyOnStartup: boolean;
+  /** Periodic hash-chain verification interval (seconds); 0 = disabled. */
+  readonly hashChainVerifyIntervalSeconds: number;
   /** `development` | `test` | `production` | anything the deployer sets. */
   readonly nodeEnv: string;
   readonly isProduction: boolean;
@@ -520,6 +528,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       env.TASK_BID_COMPACTION_INTERVAL_SECONDS,
       'TASK_BID_COMPACTION_INTERVAL_SECONDS',
       DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS,
+      86_400, // max 24 hours
+    ),
+    hashChainVerifyOnStartup: parseBoolean(
+      env.HASH_CHAIN_VERIFY_ON_STARTUP,
+      'HASH_CHAIN_VERIFY_ON_STARTUP',
+      DEFAULT_HASH_CHAIN_VERIFY_ON_STARTUP,
+    ),
+    hashChainVerifyIntervalSeconds: parseNonNegativeInt(
+      env.HASH_CHAIN_VERIFY_INTERVAL_SECONDS,
+      'HASH_CHAIN_VERIFY_INTERVAL_SECONDS',
+      DEFAULT_HASH_CHAIN_VERIFY_INTERVAL_SECONDS,
       86_400, // max 24 hours
     ),
     nodeEnv,
