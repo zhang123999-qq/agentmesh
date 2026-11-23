@@ -164,3 +164,16 @@ curl -kf https://localhost:8443/health
 - **M9 仍需要真实 Docker 环境**：`docker compose up` + Caddy TLS + 容器内 seed-admin + 卷恢复 +
   在容器/Caddy origin 上跑 e2e（BASE_URL）——这些 CI 默认 job 不覆盖，须人工在 Docker 环境执行并签字。
 - 失败排查：CI badge → Actions 运行日志；本地复现命令见 README「持续集成（CI）」。
+
+## 数据库迁移（v9 / US-022 多租户 schema）
+
+- **当前 schema 版本：v9**（`CURRENT_SCHEMA_VERSION`）。迁移幂等，启动自动执行；独立命令：
+  `node apps/server/dist/cli/migrate.js --db <path>`（或容器内 `docker compose exec server ...`）。
+- **v9 内容**：新增 `workspaces` 表并 seed `default`；重建 `channel_members` PK 为
+  `(workspace_id, channel_id, agent_id)`（v3 的 `uq_channel_members_ws` 索引折叠进 PK）。其余表
+  自 v1 起已带 `workspace_id`，无需回填。
+- **前向不可逆**：本仓库不提供 down migration。**升级前务必备份**（见「备份与恢复」）：
+  迁移失败时用备份替换 `agentmesh.db`（先移除 `-wal`/`-shm`）即可回到迁移前状态。
+- 迁移在单事务内执行，失败自动回滚到迁移前；`channel_members` 重建（建新表→拷→DROP→RENAME）在同一
+  事务内，不会留下半重建状态。
+- 回滚演练：备份 → 启动旧版本（或对备份执行 `migrate` 到目标版本）→ 校验 health。

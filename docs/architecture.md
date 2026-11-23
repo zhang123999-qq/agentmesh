@@ -53,12 +53,13 @@ docs                本目录
 - **哈希链**：`prevHash` 已写入、`verifyEventChain` 可校验，但**未自动强制**；
   拥有数据库写权限的人仍可改写历史。
 
-## 数据模型（migrations v1–v5）
+## 数据模型（migrations v1–v9）
 
 | 表 | 关键字段 | 说明 |
 | --- | --- | --- |
 | `accounts` | `secret_hash` | 账号与 SHA-256 凭证摘要（v4） |
-| `channels` / `channel_members` | 复合主键 | 频道与成员关系；多 workspace 共存需 US-022+ 重建 PK |
+| `workspaces` | `id` PK | 租户注册表 + seed `default`（v9，US-022） |
+| `channels` / `channel_members` | 复合主键 | 频道与成员关系；v9 重建 `channel_members` PK 为 `(workspace_id, channel_id, agent_id)`；`channels` PK 保持 `id` |
 | `messages` | `seq` UNIQUE | 消息；`seq` 与事件共享全局序列（v3） |
 | `tasks` | `version` | 任务；CAS 乐观并发 |
 | `task_bids` | `tombstone` / `stable_frontier` | OR-Set 竞标集合与压缩游标 |
@@ -155,7 +156,7 @@ docs                本目录
 - `docker/compose.yaml`：server + Caddy；Caddy 终止 TLS（本地 `tls internal`，
   生产自动证书）；`ALLOWED_ORIGINS` 显式；不设 `ALLOW_ADMIN_SELF_REGISTER`。
 - 密钥：Docker secret → entrypoint → `JWT_SECRET`，不进镜像/compose/日志。
-- 运维：`migrate`/`backup` CLI（v8 幂等、WAL 一致性备份）、`seed-admin` 容器内执行。
+- 运维：`migrate`/`backup` CLI（v9 幂等、WAL 一致性备份）、`seed-admin` 容器内执行。
 - 无 Docker 环境时 `npm run verify:docker` 验证 health / migrate / backup / 关闭脚本。
 
 ## 测试金字塔

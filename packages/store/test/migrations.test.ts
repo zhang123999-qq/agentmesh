@@ -44,8 +44,9 @@ describe('migrations', () => {
       'bid_events_per_version',
       'task_progress_and_side_effect_events',
       'task_completed_at',
+      'multi_tenant_schema',
     ]);
-    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it('is idempotent: a second run applies nothing and does not throw', () => {
@@ -53,7 +54,7 @@ describe('migrations', () => {
     const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(listAppliedMigrations(db)).toHaveLength(8);
+    expect(listAppliedMigrations(db)).toHaveLength(9);
 
     // Third run on the same handle: still fine.
     expect(() => runMigrations(db)).not.toThrow();
@@ -65,7 +66,7 @@ describe('migrations', () => {
     db.exec('DELETE FROM schema_version');
     expect(getSchemaVersion(db)).toBe(0);
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
   });
 
@@ -108,18 +109,23 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8], version: 8 });
-    expect(getSchemaVersion(db)).toBe(8);
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8, 9], version: 9 });
+    expect(getSchemaVersion(db)).toBe(9);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-    // Only indexes were added — the table definition is byte-identical.
+    // messages is untouched by v3-v9, so its table definition is byte-identical.
     const schemaAfter = db
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages'")
       .get() as { sql: string };
     expect(schemaAfter.sql).toBe(schemaBefore.sql);
 
     expect(indexNames(db, 'messages')).toContain('uq_messages_seq');
-    expect(indexNames(db, 'channel_members')).toContain('uq_channel_members_ws');
+    // v9 rebuild: channel_members PK now includes workspace_id; the v3 uq index
+    // is folded into the PK and no longer exists as a standalone index.
+    expect(indexNames(db, 'channel_members')).not.toContain('uq_channel_members_ws');
+    expect(
+      columnsOf(db, 'channel_members').filter((c) => c.pk > 0).map((c) => c.name),
+    ).toEqual(['workspace_id', 'channel_id', 'agent_id']);
     expect(
       (db.prepare("SELECT body FROM messages WHERE id = 'msg_legacy'").get() as { body: string })
         .body,
@@ -176,12 +182,10 @@ describe('migrations', () => {
     expect(indexNames(db, 'events')).toContain('idx_events_aggregate');
   });
 
-  it('creates the v3 hardening indexes on a fresh database', () => {
+  it('keeps the v3 message index and folds channel_members uniqueness into the v9 PK', () => {
     const { db } = makeStore();
 
     expect(indexNames(db, 'messages')).toContain('uq_messages_seq');
-    expect(indexNames(db, 'channel_members')).toContain('uq_channel_members_ws');
-
     const indexSql = (name: string): string =>
       (
         db
@@ -190,15 +194,14 @@ describe('migrations', () => {
       ).sql;
     expect(indexSql('uq_messages_seq')).toContain('UNIQUE');
     expect(indexSql('uq_messages_seq')).toContain('messages(seq)');
-    expect(indexSql('uq_channel_members_ws')).toContain(
-      'channel_members(workspace_id, channel_id, agent_id)',
-    );
 
-    // The channel_members primary key is deliberately NOT rebuilt by v3.
+    // v9 rebuilt channel_members with a workspace-scoped PK; the standalone
+    // v3 uq_channel_members_ws index was dropped and is not recreated.
+    expect(indexNames(db, 'channel_members')).not.toContain('uq_channel_members_ws');
     const membersPk = columnsOf(db, 'channel_members')
       .filter((c) => c.pk > 0)
       .map((c) => c.name);
-    expect(membersPk).toEqual(['channel_id', 'agent_id']);
+    expect(membersPk).toEqual(['workspace_id', 'channel_id', 'agent_id']);
   });
 
   it('adds a nullable accounts.secret_hash column (v4) to a fresh database', () => {
@@ -279,11 +282,11 @@ describe('migrations', () => {
     expect(columnsOf(db, 'accounts').filter((c) => c.name === 'secret_hash')).toHaveLength(1);
 
     // A manual body re-run must not corrupt the ledger.
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(runMigrations(db).applied).toEqual([]);
   });
 
-  it('upgrades an existing v3 database to v8 without rewriting account rows', () => {
+  it('upgrades an existing v3 database to v9 without rewriting account rows', () => {
     const db = openDatabase(':memory:');
     db.exec(`
       CREATE TABLE IF NOT EXISTS schema_version (
@@ -312,8 +315,8 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [4, 5, 6, 7, 8], version: 8 });
-    expect(getSchemaVersion(db)).toBe(8);
+    expect(result).toEqual({ applied: [4, 5, 6, 7, 8, 9], version: 9 });
+    expect(getSchemaVersion(db)).toBe(9);
     expect(columnsOf(db, 'accounts').map((c) => c.name)).toContain('secret_hash');
 
     const row = db
@@ -337,5 +340,61 @@ describe('migrations', () => {
     const before = tableNames(db);
     runMigrations(db);
     expect(tableNames(db)).toEqual(before);
+  });
+});
+
+describe('v9 multi-tenant schema (US-022)', () => {
+  it('creates a workspaces registry and seeds the default workspace', () => {
+    const { db } = makeStore();
+    expect(tableNames(db)).toContain('workspaces');
+    const row = db
+      .prepare('SELECT id, name FROM workspaces WHERE id = ?')
+      .get('default') as { id: string; name: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row?.name).toBe('Default');
+  });
+
+  it('channel_members PK is workspace-scoped so two workspaces can share (channel, agent)', () => {
+    const { db } = makeStore();
+    const insert = db.prepare(
+      `INSERT INTO channel_members (workspace_id, channel_id, agent_id, joined_at)
+       VALUES (?, ?, ?, ?)`,
+    );
+    insert.run('ws-a', 'chn_shared', 'agt_1', 1);
+    insert.run('ws-b', 'chn_shared', 'agt_1', 2); // must NOT violate the PK
+    const count = db
+      .prepare('SELECT COUNT(*) AS c FROM channel_members WHERE channel_id = ?')
+      .get('chn_shared') as { c: number };
+    expect(count.c).toBe(2);
+  });
+
+  it('preserves legacy channel_members rows and defaults them to the default workspace', () => {
+    const db = openDatabase(':memory:');
+    // Build exactly up to v8 (old 2-col PK), insert a legacy membership, then v9.
+    db.exec(
+      `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);`,
+    );
+    const record = db.prepare(
+      'INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)',
+    );
+    for (const migration of MIGRATIONS.filter((m) => m.version <= 8)) {
+      db.transaction(() => {
+        migration.up(db);
+        record.run(migration.version, migration.name, 1_000 + migration.version);
+      })();
+    }
+    db.prepare(
+      `INSERT INTO channel_members (channel_id, agent_id, joined_at) VALUES ('chn_legacy', 'agt_x', 7)`,
+    ).run();
+
+    const result = runMigrations(db);
+    expect(result).toEqual({ applied: [9], version: 9 });
+
+    const row = db
+      .prepare('SELECT workspace_id, joined_at FROM channel_members WHERE channel_id = ?')
+      .get('chn_legacy') as { workspace_id: string; joined_at: number };
+    expect(row).toEqual({ workspace_id: 'default', joined_at: 7 });
+    // Idempotent: re-running does not re-apply v9 or rebuild again.
+    expect(runMigrations(db).applied).toEqual([]);
   });
 });

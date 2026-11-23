@@ -29,6 +29,7 @@ export * from './dao/tasks.js';
 export * from './dao/task-bids.js';
 export * from './dao/events.js';
 export * from './dao/snapshots.js';
+export * from './dao/workspaces.js';
 
 import { openDatabase, type AgentMeshDatabase } from './db.js';
 import { runMigrations } from './migrations.js';
@@ -40,6 +41,7 @@ import { MessagesDao } from './dao/messages.js';
 import { SnapshotsDao } from './dao/snapshots.js';
 import { TaskBidsDao } from './dao/task-bids.js';
 import { TasksDao } from './dao/tasks.js';
+import { WorkspacesDao } from './dao/workspaces.js';
 
 /** All DAOs wired to one database handle. */
 export interface Repositories {
@@ -51,6 +53,7 @@ export interface Repositories {
   taskBids: TaskBidsDao;
   events: EventsDao;
   snapshots: SnapshotsDao;
+  workspaces: WorkspacesDao;
 }
 
 /** Build every DAO for a database handle (cheap: DAOs only hold the handle). */
@@ -64,6 +67,7 @@ export function createRepositories(db: AgentMeshDatabase): Repositories {
     taskBids: new TaskBidsDao(db),
     events: new EventsDao(db),
     snapshots: new SnapshotsDao(db),
+    workspaces: new WorkspacesDao(db),
   };
 }
 

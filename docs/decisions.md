@@ -623,3 +623,33 @@ lockfile）；CI e2e job 用 `npm ci` 后 `npm install --no-save @playwright/tes
 
 ### 与 US-021D 交互
 撤销在多租户下按 workspace 隔离；持久化 + 隔离在 US-022/023 一起评估，本评审不夹带实现。
+
+## US-022 多租户 schema 迁移（v9，5 个决策）
+
+> 前置：US-021E 已锁死。本故事只动 schema + 迁移，不做 RPC 鉴权（US-023）。
+
+1. **v9 范围（逐表）**：
+   - **新增 `workspaces(id PK, name, created_at)`** + seed `default`（US-023/025 需要租户注册表）。
+   - **`channel_members` 重建 PK** 为 `(workspace_id, channel_id, agent_id)`；v3 的
+     `uq_channel_members_ws` 唯一索引**折叠进 PK**（随重建 DROP，不再单独存在）；重建后补回
+     `idx_channel_members_agent/channel`。
+   - **`channels` PK 保持 `id`**（id 为全局唯一随机值，无需 workspace 维度）。
+   - `accounts/messages/tasks/task_bids/events/snapshots` 自 v1 起已有 `workspace_id NOT NULL
+     DEFAULT 'default'` + 索引，**v9 不改**。
+2. **backfill**：**无需**。`workspace_id` 默认值在 INSERT 时生效，既有行已为 `'default'`；迁移内不写回填
+   SQL，但测试断言 legacy（v8）`channel_members` 行经重建后 `workspace_id='default'`、数据保留。
+3. **回滚**：v9 **前向不可逆**，无 down migration；“回滚”= 从备份恢复（见 operations.md）。每个迁移在
+   事务内执行，失败自动回滚到迁移前状态。`channel_members` 重建在单事务内（建新表→拷→DROP→RENAME），
+   并发写被 `runMigrations` 的写锁与启动时机规避。
+4. **events 表**：已有 `workspace_id` 列 + `idx_events_workspace`；**无需新增列**。`seq` 仍全局唯一
+   （US-021E 评审确认兼容：读取按 workspace 过滤，seq 空间不变）。
+5. **与 US-021D 协调**：US-021D 结论为“保持进程内撤销”，故 v9 **不含**撤销表；若未来改为持久化，
+   走独立 **v10**，不与 v9 合并。
+
+**实现/幂等**：`workspaces` 用 `CREATE TABLE IF NOT EXISTS` + `INSERT OR IGNORE`；`channel_members` 重建前
+用 `PRAGMA table_info` 检查 PK 是否已含 `workspace_id`，已含则跳过。新增 `WorkspacesDao`
+（create/get/exists/list）并接入 `Repositories`。
+
+**测试（store 71→74）**：v9 建 `workspaces` 并 seed `default`；`channel_members` PK 允许两 workspace
+共享 `(channel, agent)`；v8→v9 保留 legacy 行且默认 `'default'`、二次运行 applied=[]。
+`verify-local.mjs` / `cli-maintenance` / `migrations` 的 schema 版本断言 8→9 全部同步。

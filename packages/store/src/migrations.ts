@@ -275,6 +275,65 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_events_aggregate_version_status
 
 const ACCOUNT_CREDENTIALS_SQL = 'ALTER TABLE accounts ADD COLUMN secret_hash TEXT';
 
+/**
+ * v9 — multi-tenant schema (US-022, locked design US-021E).
+ *
+ * Every business table already carried `workspace_id NOT NULL DEFAULT 'default'`
+ * since v1, so no column/backfill is needed for existing rows. v9 does two
+ * things the single-workspace MVP deferred:
+ *
+ *  1. add a `workspaces` registry table and seed the `default` row (US-023/025
+ *     need a place to create/list tenants);
+ *  2. rebuild `channel_members` so its PRIMARY KEY includes `workspace_id`
+ *     (`(workspace_id, channel_id, agent_id)`). The old PK was
+ *     `(channel_id, agent_id)`; channel ids are already globally unique, but the
+ *     workspace-scoped PK makes the invariant explicit and lets two workspaces
+ *     ever share a `(channel_id, agent_id)` pair. The rebuild folds in the v3
+ *     `uq_channel_members_ws` index (the PK now covers it), so that index is
+ *     dropped by the table rebuild and not recreated.
+ *
+ * Backfill: none. `workspace_id` defaults are applied at INSERT time; existing
+ * rows already read `'default'`. This migration is idempotent (PK guard + IF
+ * NOT EXISTS + INSERT OR IGNORE).
+ */
+const WORKSPACES_SQL = `
+CREATE TABLE IF NOT EXISTS workspaces (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  created_at  INTEGER NOT NULL
+);
+`;
+
+const CHANNEL_MEMBERS_REBUILD_SQL = `
+DROP TABLE IF EXISTS channel_members_v9;
+CREATE TABLE channel_members_v9 (
+  workspace_id  TEXT NOT NULL DEFAULT '${DEFAULT_WORKSPACE_ID}',
+  channel_id    TEXT NOT NULL,
+  agent_id      TEXT NOT NULL,
+  joined_at     INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, channel_id, agent_id)
+);
+INSERT INTO channel_members_v9 (workspace_id, channel_id, agent_id, joined_at)
+  SELECT workspace_id, channel_id, agent_id, joined_at FROM channel_members;
+DROP TABLE channel_members;
+ALTER TABLE channel_members_v9 RENAME TO channel_members;
+CREATE INDEX IF NOT EXISTS idx_channel_members_agent
+  ON channel_members(workspace_id, agent_id);
+CREATE INDEX IF NOT EXISTS idx_channel_members_channel
+  ON channel_members(channel_id);
+`;
+
+/** True once `channel_members` has been rebuilt with a workspace-scoped PK. */
+function channelMembersPkIncludesWorkspace(db: AgentMeshDatabase): boolean {
+  const columns = db.pragma("table_info('channel_members')") as Array<{
+    name: string;
+    pk: number;
+  }>;
+  const workspace = columns.find((c) => c.name === 'workspace_id');
+  return workspace !== undefined && workspace.pk > 0;
+}
+
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -336,6 +395,21 @@ export const MIGRATIONS: readonly Migration[] = [
     up: (db) => {
       if (!hasColumn(db, 'tasks', 'completed_at')) {
         db.exec(TASK_COMPLETED_AT_SQL);
+      }
+    },
+  },
+  {
+    version: 9,
+    name: 'multi_tenant_schema',
+    up: (db) => {
+      db.exec(WORKSPACES_SQL);
+      db.prepare('INSERT OR IGNORE INTO workspaces (id, name, created_at) VALUES (?, ?, ?)').run(
+        DEFAULT_WORKSPACE_ID,
+        'Default',
+        Date.now(),
+      );
+      if (!channelMembersPkIncludesWorkspace(db)) {
+        db.exec(CHANNEL_MEMBERS_REBUILD_SQL);
       }
     },
   },

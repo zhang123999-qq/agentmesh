@@ -2,6 +2,22 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-022 多租户 schema 迁移（v9）
+
+测试基线：**575**（store 71 → 74；其余不变）。schema 版本 **v8 → v9**。
+
+- v9 迁移：新增 `workspaces(id, name, created_at)` + seed `default`；重建 `channel_members` PK 为
+  `(workspace_id, channel_id, agent_id)`（v3 `uq_channel_members_ws` 折叠进 PK，随重建 DROP）；
+  其余表自 v1 起已有 `workspace_id NOT NULL DEFAULT 'default'`，**无回填**。幂等
+  （`PRAGMA table_info` 守卫 + `IF NOT EXISTS` + `INSERT OR IGNORE`），单事务执行。
+- 新增 `WorkspacesDao`（create/get/exists/list）并接入 `Repositories`。
+- 测试（+3，store 71→74）：v9 建 `workspaces` 并 seed default；两 workspace 可共享
+  `(channel, agent)`；v8→v9 保留 legacy `channel_members` 行、`workspace_id` 默认 `'default'`、二次
+  运行 `applied=[]`。
+- 版本断言 8→9 全同步：`docker/verify-local.mjs`、`migrations.test.ts`、`cli-maintenance.test.ts`。
+- **无运行时行为变更**：代码仍用常量 `default`；切到 token 派生在 US-023。迁移**前向不可逆**，升级前备份。
+- 回归：`npm run verify` 全绿、`verify:docker` 通过；CI（verify / web-e2e / docker）随提交复跑。
+
 ## 2026-11-23 — 决策：US-021D 撤销持久化 + US-021E 多租户评审
 
 测试基线：**572**（不变；本节只出决策，不改代码）。
