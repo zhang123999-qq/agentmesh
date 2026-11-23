@@ -2,6 +2,66 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-021B P1 覆盖率核实 + 定时 compaction 修复
+
+测试基线：**546**（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19）。
+
+这是 US-021B P1 测试补齐的**核实故事**（不改运行语义；发现的真实缺陷另起 `fix:`）。
+
+### 6 点核实结论
+
+1. **计数（最高优先级）**：报告“528（protocol +8, server +7）”为**误计**。实际（本故事开工前）为
+   **541** = core 52 / protocol **105** / store 71 / sdk **9** / adapters 7 / mock-agents 1 / server
+   **277** / cli 19。`domain-event-payload.test.ts` **确实被 vitest 收集并执行**（12 条全绿，可定位到
+   用例名），因此不属于“文件未被收集”；偏差来源：protocol 实为 **+12**（非 +8），且 sdk 自 US-020
+   起就是 **9**（旧基线“8”系历史误计）。回归后本故事再 +4（四态断言）+1（compaction 测试）= **546**。
+2. **domain 事件清单**：`account.registered` / `account.authenticated` **确为 domain-only**
+   （在 `DOMAIN_ONLY_EVENT_TYPES` 且不在 `NOTIFICATION_EVENT_TYPES`，且在 `domainEventPayloadSchemas`
+   中）。报告无误划，**未改 schema**。发布点：register/seed→`accounts.ts:535/613`，authenticate→
+   `accounts.ts:719`；`task.compaction.completed`→`tasks.ts` 定时回调。这些事件默认不广播，
+   仅 admin `system.subscribe{includeDomainEvents}` 追加接收（US-020）。
+3. **四态断言**：原测试仅覆盖“base 合法 + 可选字段 省略/有值/null 拒绝”，**缺**必填数值字段的
+   缺失/null/负数/浮点/错类型拒绝。已补：`compactedTasks` / `totalRemoved` 五态拒绝、
+   `errors` 非数组拒绝、`account.registered.name` 必填断言（`domain-event-payload.test.ts` 12→16）。
+4. **`compactionTimerCleared` 断言方式**：核实发现原 `verify-local.mjs` 是
+   `win32 ? true : exit.code===0 && !timeout`——纯**退出码推断（隐性验证）**，Windows 上硬编码 true。
+   已重写为**日志显式断言**：server 以 `LOG_LEVEL=info` 启动、捕获 stdout/stderr、断言
+   `task.compaction.timer.started` 与 `task.compaction.timer.cleared` 两条结构化日志；Windows 无 SIGTERM
+   则如实记 **`"n/a"`**（operations.md 补了 Linux 手工步骤）。实测：
+   `{"compactionTimerStarted":true,"compactionTimerCleared":"n/a","platform":"win32"}`。
+5. **P2 语义锁定**：`errors` 与所有 domain 可选字段的“显式 null 被拒绝”已有**显式断言**；
+   并在 `decisions.md` 新增「P2 — domain 事件可选字段风格」判定依据段落（`.optional()` vs
+   `.nullable().optional()` 及被否决方案），可被引用。
+6. **P3 默认关闭测试**：原 “interval=0 不启动 timer” 是**假测试**（`eventsReceived` 数组从未被填充，
+   `expect([].length).toBe(0)` 恒真）。已替换为真实断言：`app.tasks.isCompactionTimerRunning()`
+   在 interval=0 时为 `false`、>0 时为 `true`、关闭后为 `false`。
+
+### 发现并修复的真实缺陷（`fix:` 提交）
+
+两个缺陷叠加使**定时 compaction 完全空转**（`task.compaction.completed` 永不发出）：
+
+- `runCompaction()` 用 `listByTask('', ...)` 试图取全部 bid —— SQL 是 `WHERE task_id = ''`，恒返回 0 行，
+  即**永远没有待压缩任务**。改为新增 `TaskBidsDao.listTaskIds(workspaceId)` 枚举真实 task id。
+- `compactTaskBids()` 用 `bidStableFrontier(rows)` 当“新 frontier”，但该函数只**读取**现有
+  `stable_frontier` 列 → 新旧恒相等 → 恒 early-return 不压缩。改为把 frontier 推进到 tombstone 行的
+  最大 counter（单写者 SQLite 下 tombstone 即稳定），只回收 `counter <= frontier` 的 tombstone，live 保留。
+
+### 新增/强化测试与可观测性
+
+- `tasks.compaction.test.ts` 重写为真实集成断言：tombstone 物理回收、live 保留、frontier 前进、
+  幂等、空仓 no-op、定时 tick 真实写出 `task.compaction.completed`、config 关闭/开启接线、
+  `startCompactionTimer/stopCompactionTimer` 生命周期。
+- `TasksService` 新增 `isCompactionTimerRunning()`；`startCompactionTimer`/`stopCompactionTimer`
+  输出 `task.compaction.timer.started` / `task.compaction.timer.cleared` 结构化日志。
+- `app.ts` 把真实 logger 注入 tasks 模块（此前为空实现），使上述日志可用。
+
+### 回归（四项全过 + verify:docker）
+
+- `npm run verify` 全绿；`npm audit --audit-level=high` = 0；`npm audit --omit=dev --audit-level=high` = 0；
+  `npm run demo` 退出码 0（cleanExit、-32007 冲突）；`npm run build -w @agentmesh/web` 通过；
+  `npm run verify:docker` = `{"health":true,"gracefulShutdown":true,"migrate":true,"backup":true,
+  "compactionTimerStarted":true,"compactionTimerCleared":"n/a","platform":"win32"}`。
+
 ## 2026-11-22 — US-021B 定时 compaction
 
 测试基线：**521**（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。

@@ -52,6 +52,28 @@ DB_PATH=data/agentmesh.db \
 - 自有的 SQLite 句柄关闭；
 - pino 同步写 stdout，无未 flush 缓冲区。
 
+## compaction 定时器（US-021B / `TASK_BID_COMPACTION_INTERVAL_SECONDS`）
+
+- 默认关闭（`0`）。开启后每 N 秒运行一次 `runCompaction`，回收已过 `stableFrontier` 的
+  bid tombstone（live bid 永不删除）；有实际回收时写 `task.compaction.completed` domain-only 事件。
+- 定时器 start/clear 有结构化日志：`task.compaction.timer.started` / `task.compaction.timer.cleared`，
+  `verify:docker` 依据这两条日志**显式断言**生命周期（不靠退出码推断）。
+- **Linux 手工验证定时器清理**（Windows 上 `verify-local.mjs` 把 `compactionTimerCleared` 如实记为
+  `n/a`，因为 Windows 不投递 SIGTERM）：
+
+  ```bash
+  npm run build
+  PORT=18888 DB_PATH=/tmp/am.db JWT_SECRET=$(openssl rand -hex 32) \
+    ALLOWED_ORIGINS=https://localhost LOG_LEVEL=info \
+    TASK_BID_COMPACTION_INTERVAL_SECONDS=1 \
+    node apps/server/dist/index.js > /tmp/am.log 2>&1 &
+  pid=$!
+  sleep 2
+  grep -q 'task.compaction.timer.started' /tmp/am.log && echo 'started OK' || echo 'MISSING started'
+  kill -TERM "$pid"; wait "$pid"
+  grep -q 'task.compaction.timer.cleared' /tmp/am.log && echo 'cleared OK' || echo 'MISSING cleared'
+  ```
+
 ## 健康检查
 
 `GET /health` 返回 `status/version/protocolVersion/uptime/nodeEnv/timestamp`。

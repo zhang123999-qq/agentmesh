@@ -18,11 +18,16 @@
 | US-016 | **完成（本地验证）** | `agentmesh` CLI：register/login/whoami、channel、message、task 全生命周期、watch、doctor；复用 SDK |
 | US-019 | **完成（本地验证）** | Next.js 管理后台：admin-only，SSR 跳过 WS，全局 seq 去重，auto gap 策略，audit view，Playwright smoke 策略 |
 | US-020 | **完成（本地验证）** | `system.subscribe`：admin opt-in domain events，per-session 订阅，RPC 22/22 |
-| US-021B | **完成（本地验证）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理 |
+| US-021B | **完成（本地验证，P1 已核实并修复空转 bug）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理；`verify:docker` 显式断言定时器 start/clear |
 | US-021C…US-021F | 未开始 | 技术债归口 |
 
-测试基线：**521**
-（core 52 / protocol 93 / store 71 / sdk 8 / adapters 7 / mock-agents 1 / server 270 / cli 19）。
+测试基线：**546**
+（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19）。
+
+> US-021B P1 覆盖率核实（2026-11-23）：`domain-event-payload.test.ts` **12→16**、`tasks.compaction.test.ts`
+> **7→8**（含真实压缩/定时器断言）。sdk 的“8”是历史误计（自 US-020 起为 9）。核实中发现并修复两个
+> 使定时 compaction 完全空转的缺陷（`runCompaction` 用哨兵 task id、`compactTaskBids` 的 frontier
+> 恒不变），见 changelog 2026-11-23。
 
 US-008 的判定依据与 notes 见 [us-008-notes.md](us-008-notes.md)。关键语义：
 

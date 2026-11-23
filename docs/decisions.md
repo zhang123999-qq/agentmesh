@@ -357,3 +357,22 @@ CAS（version +1）；后续 progress 只原地更新 `tasks.progress`，不碰 
 - compaction 完成后写 `task.compaction.completed` domain 事件（含 `compactedTasks` / `totalRemoved` / `errors`）。
 - 默认关闭，避免无谓开销；按需开启（如 `TASK_BID_COMPACTION_INTERVAL_SECONDS=3600`）。
 - `npm run verify` 全绿；`npm run demo` 退出码 0；`npm audit --omit=dev` 为 0；`npm run verify:docker` 通过。
+
+### P2 — domain 事件可选字段风格（US-021B P1 核实锁定）
+
+domain-only 事件的 payload 可选字段使用 **`.optional()`**，**不用** `.nullable().optional()`：
+
+- 发射端**省略**缺省字段，从不写 `null`（与 US-021A 通知一致）；
+- 事件日志里"字段缺失"与"字段为 `null`"语义不同：显式 `null` 视为契约违规 → 被 schema 拒绝；
+- 契约由 `packages/protocol/test/domain-event-payload.test.ts` 锁定：每个可选字段断言
+  "省略通过 / 有值通过 / 显式 `null` 被拒绝"；`task.compaction.completed` 的必填数值字段
+  （`compactedTasks` / `totalRemoved`）另断言 **缺失 / `null` / 负数 / 浮点 / 错类型** 全部被拒绝，
+  `errors` 另断言 **非数组被拒绝**。
+
+被否决的替代方案：与 notification 统一用 `.nullable().optional()`——那会把 `null` 当成 domain
+流的合法值，reducer 需要额外分支，且会掩盖 producer 误写 `null` 的 bug。US-021A 的 notification
+基准不受影响（notification 仍为 `.nullable().optional()`）。
+
+domain 事件边界核实结论：`account.registered` / `account.authenticated` **确为 domain-only 事件**
+（在 `DOMAIN_ONLY_EVENT_TYPES` 且不在 `NOTIFICATION_EVENT_TYPES`），报告无误划；不改 schema。
+
