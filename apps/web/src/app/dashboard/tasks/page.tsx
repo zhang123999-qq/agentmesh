@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useSdk } from '@/lib/sdk-provider';
 import { useToast } from '@/lib/toast';
 import { useSearchParams } from 'next/navigation';
+import { mapTaskActionError } from '@/lib/admin-errors';
 
 type TaskStatus = 'draft' | 'open' | 'bidding' | 'awarded' | 'in_progress' | 'review' | 'done' | 'failed' | 'cancelled';
 
@@ -307,15 +308,7 @@ const executeCasAction = async (
         setBids(bidResult.bids);
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : `${action} 失败`;
-      if (msg.includes('-32007') || msg.includes('version conflict')) {
-        showToast(
-          `版本冲突：请刷新任务详情获取最新 version，当前 expected=${actionExpectedVersion}`,
-          'error'
-        );
-      } else {
-        showToast(msg, 'error');
-      }
+      showToast(mapTaskActionError(err, action, actionExpectedVersion).message, 'error');
     } finally {
       setExecutingAction(null);
     }

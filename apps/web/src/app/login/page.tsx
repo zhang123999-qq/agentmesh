@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSdk } from '@/lib/sdk-provider';
 import { useToast } from '@/lib/toast';
+import { mapLoginError } from '@/lib/admin-errors';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -54,14 +55,7 @@ export default function LoginPage() {
       router.push(redirectTo);
       router.refresh();
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '登录失败';
-      if (msg.includes('-32001') || msg.includes('Unauthorized')) {
-        showToast('凭据无效或已过期', 'error');
-      } else if (msg.includes('-32002')) {
-        showToast('权限不足：需要 admin 角色', 'error');
-      } else {
-        showToast(msg, 'error');
-      }
+      showToast(mapLoginError(err).message, 'error');
     } finally {
       setLoading(false);
     }

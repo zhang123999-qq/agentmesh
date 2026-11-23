@@ -395,3 +395,25 @@ domain 事件边界核实结论：`account.registered` / `account.authenticated`
 `.cleared` 日志，则日志断言不会变红——该断言证明"清理路径被执行"，而非"`clearInterval` 本身执行"。
 真实失败模式（onClose 接线被移除 / `stopCompactionTimer` 从未被调用）会被捕获。如需更强保证，
 可再加"定时器对象已置空"的进程内可观测断言（`isCompactionTimerRunning()` 关闭后必须为 false，已有测试覆盖）。
+
+## US-021G Web 测试基线（4 个决策）
+
+1. **测试范围**：三层。
+   - 单元（node env + vitest）：`seq-registry`（US-019 决策 3 跨列表去重）、`admin-errors`
+     （-32001/-32002 登录映射；-32007 展示 expected+current）。
+   - 集成（真实 SDK + mock transport）：真实 `AgentMeshClient` 驱动，`message.new` 与 history
+     共享 seq 经 registry 去重；断线重连后 resume 帧携带 `lastSeenEpoch`。
+   - e2e（Playwright）：`apps/web/e2e`，`BASE_URL` 参数化，供 M9 复用；不纳入根 verify。
+   被否决：只做单元（覆盖不到 SDK↔UI 去重）；只做 e2e（慢、脆、CI 成本高）。
+2. **是否纳入根 verify**：单元 + 集成**纳入**（web `test` 脚本改为 `vitest run`，被根
+   `npm test --workspaces` 自动包含）；e2e **单独**（`npm run test:e2e`），README 写明何时跑、
+   失败处置，避免变成"永远不跑的装饰"。被否决：e2e 纳入 verify（每次起浏览器太慢且需真实栈）。
+3. **mock 策略**：集成测试用**真实 SDK + mock transport**（不 mock 客户端），与 sdk 包测试一致，
+   避免 mock 与真实语义漂移。被否决：mock SDK 客户端（会与真实去重/resume 语义脱节）。
+4. **e2e 复用边界**：**M9 引用本故事脚本**（`BASE_URL` + `ADMIN_AGENT_ID`/`ADMIN_SECRET` 参数化），
+   不另写第二套 Playwright。被否决：M9 内联手写（重复且易漂移）。
+
+**已知限制（诚实记录）**：本环境 npm 11.20.0 的 arborist `diffTrees` 缺陷使 `npm i -D @playwright/test`
+失败，且本机无浏览器/无运行栈，故 e2e **已编写但未在本机执行**（脚本+配置齐全，M9 具备环境后按
+README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → seq-registry 单测 2 条 + 集成去重 1 条
+变红，恢复后全绿。

@@ -19,10 +19,14 @@
 | US-019 | **完成（本地验证）** | Next.js 管理后台：admin-only，SSR 跳过 WS，全局 seq 去重，auto gap 策略，audit view，Playwright smoke 策略 |
 | US-020 | **完成（本地验证）** | `system.subscribe`：admin opt-in domain events，per-session 订阅，RPC 22/22 |
 | US-021B | **完成（本地验证，P1 已核实并修复空转 bug）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理；`verify:docker` 显式断言定时器 start/clear |
+| US-021G | **完成（本地验证，e2e 未执行）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本就绪（供 M9 复用），因 npm arborist 缺陷 + 无浏览器未在本机执行 |
 | US-021C…US-021F | 未开始 | 技术债归口 |
 
-测试基线：**546**
-（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19）。
+测试基线：**557**
+（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19 / **web 11**）。
+
+> US-021G Web 测试基线（2026-11-23）：web `test` 改为 `vitest run` 纳入根 verify（单元 7 + 集成 4）；
+> e2e 脚本已就绪（BASE_URL 参数化，供 M9 复用）但未在本机执行（npm arborist 缺陷 + 无浏览器/栈）。
 
 > US-021B P1 覆盖率核实（2026-11-23）：`domain-event-payload.test.ts` **12→16**、`tasks.compaction.test.ts`
 > **7→8**（含真实压缩/定时器断言）。sdk 的“8”是历史误计（自 US-020 起为 9）。核实中发现并修复两个

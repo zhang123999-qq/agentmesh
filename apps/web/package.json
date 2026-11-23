@@ -10,7 +10,8 @@
     "start": "next start",
     "lint": "echo 'Skipping lint for web (ESLint patch issue)'",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'Skipping test for web (Next.js)'",
+    "test": "vitest run",
+    "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "audit": "npm audit --omit=dev --audit-level=high",
     "clean": "rm -rf .next out dist"
   },

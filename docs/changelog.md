@@ -2,6 +2,25 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-021G Web 测试基线
+
+测试基线：**557**（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19 / **web 11**）。
+
+- Web `test` 脚本由占位 `echo` 改为 `vitest run`（node env），被根 `npm test --workspaces`
+  自动包含，因此进入 `npm run verify` 门槛（US-021G 决策 2）。
+- 单元（7）：`seq-registry`（US-019 决策 3 跨列表 seq 去重）、`admin-errors`（登录
+  -32001/-32002 映射；-32007 展示 expected+current）。
+- 集成（4，真实 SDK + mock transport）：live `message.new` 与 history 共享 seq 去重；
+  断线重连后 resume 帧携带 `lastSeenEpoch`。
+- 抽取纯函数 `apps/web/src/lib/admin-errors.ts`；登录/任务页改为调用（-32007 现在会展示
+  `currentVersion`）。
+- e2e：`apps/web/e2e/`（playwright config + smoke spec），`BASE_URL` +
+  `ADMIN_AGENT_ID`/`ADMIN_SECRET` 参数化，供 M9 复用；不纳入 verify。
+  **未在本机执行**：npm 11.20.0 arborist 缺陷导致 `@playwright/test` 安装失败，且无浏览器/运行栈；
+  脚本与配置已就绪，M9 具备环境后按 README 执行。
+- 故障注入自检：破坏 `markSeqSeen` 恒返回 true → 3 条测试变红，恢复后全绿。
+- 回归：`npm run verify` / `audit`×2 / `demo` / `verify:docker` 全过。
+
 ## 2026-11-23 — US-021B P1 覆盖率核实 + 定时 compaction 修复
 
 测试基线：**546**（core 52 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 278 / cli 19）。
