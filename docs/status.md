@@ -22,7 +22,8 @@
 | US-021G | **完成（本地验证，e2e 未执行）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本就绪（供 M9 复用），因 npm arborist 缺陷 + 无浏览器未在本机执行 |
 | US-021C | **完成（本地验证）** | 事件哈希链定期校验：分批 verify、启动一次 + 定时（默认 1h）、`/health.hashChain`、verify:docker 定时器断言 |
 | US-021D | **完成（本地验证）** | token 撤销：`agent.revokeToken`（admin，23/23）、进程内 LRU + verify 校验、重启不保留（文档） |
-| US-021E…US-021F | 未开始 | 技术债归口 |
+| US-021E | **设计草案待评审** | 多租户隔离：workspace 一等公民、v9 迁移、RPC 归属表、presence 隔离、拆 US-022…025 |
+| US-021F | **评估完成：仍不做** | SQLCipher：现状/触发/成本/风险/复审条件已记 decisions.md |
 
 测试基线：**569**
 （core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 19 / **web 11**）。
@@ -200,7 +201,7 @@ US-018 的关键语义：
 | 单 workspace 债务：reclaim 固定 `default`、register 写默认 workspace、presence 不按 workspace 过滤 | US-022+ | 多租户不可用；已在 server README 记录 |
 | 哈希链无外部锚定（US-021C 已可定期校验） | US-022+ | 链尾篡改不可检测；运行时已能告警 mismatch |
 | token 撤销无持久化（US-021D 完成，仅进程内） | US-022+ | 重启后已撤销 token 在 `exp` 前复活；整集失效靠轮换 secret |
-| SQLite 明文 | US-022+ | 依赖 OS/卷加密 |
+| SQLite 明文（US-021F 复核：仍不做，复审条件已记） | US-022+ | 依赖 OS/卷加密；触发条件见 decisions.md |
 | CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |
 
 ## 下一步

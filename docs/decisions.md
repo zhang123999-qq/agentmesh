@@ -467,3 +467,57 @@ README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → 
 
 **SDK 公开 API 变更（点名）**：新增 `AgentMeshClient.revokeToken({ targetToken })`，为保持
 “类型化方法覆盖全部 RPC（23/23）”的既有约束。若不需要可回退为 `sendRaw`，但需同步下调覆盖声明。
+
+## US-021E 多租户隔离设计（**待评审**，草案，非锁死）
+
+> 状态：草案。任何 schema/RPC 变更必须走下列拆分的独立故事，本草案不开代码。
+
+### 1. 租户模型
+- `workspace` 升为一等公民：每张业务表带 `workspace_id`；JWT `workspaceId` claim 已存在，作为
+  唯一的租户来源（请求头不可覆盖）。
+- `default` workspace 迁移：保留为“遗留租户”，v9 迁移把所有既有行归入 `default`；新租户由
+  `workspace.create`（admin）创建。
+- 角色矩阵草案：`admin`（workspace 内全权）/ `agent`（业务操作）/ `observer`（只读）；
+  是否需要 **workspace-admin**（可管理本租户但非平台超管）：建议引入，避免平台单点。
+- 不这样做：所有租户共用 `default`，任意越权可见。
+
+### 2. 数据模型影响（v9）
+- `channels` / `channel_members` 复合主键加 `workspace_id`（现主键缺该维度 → 跨租户 id 冲突）。
+- 迁移：v9 加列 + 回填 `default` + 重建主键/唯一索引；回滚策略：备份替换（不写 down 迁移）。
+- 已有数据归入 `default` 的规则：按现有 `workspace_id` 列（若已有）或统一 `default`。
+
+### 3. RPC 影响（当前 23 个）
+- 归属表（草案）：所有 `task.*` / `channel.*` / `message.*` 从 **token 的 workspaceId 推断**，
+  不新增参数（防伪造）；`agent.list` 限定本租户；`system.subscribe` 仅本租户事件。
+- `agent.revokeToken` 仅能撤销本租户 token（校验 target token 的 workspaceId 与调用者一致）。
+
+### 4. presence
+- 内存 presence 结构按 `workspaceId` 分桶；广播按租户过滤。
+- 测试点：跨租户 presence 不可见；断线 offline 仅广播本租户。
+
+### 5. 安全边界（负向测试清单）
+- 伪造 `workspaceId` 请求头 → 被 token claim 覆盖，无法越权。
+- 用 A 租户 token 访问 B 租户 `task.get`/`channel.list`/`message.history` → `-32004/-32002`。
+- `resume` 只重放本租户事件；跨租户 seq 不串。
+
+### 6. 拆分策略（每 PR 独立可回滚）
+- US-022：schema + v9 迁移（加 workspace 维度、回填 default）。
+- US-023：RPC + 鉴权（全部 RPC 的租户归属与负向测试）。
+- US-024：presence + Web（租户切换 UI、隔离）。
+- US-025：运维（租户创建、迁移、备份按租户）。
+
+### 7. 明确不做
+- MVP **不支持**跨 workspace 共享任务/频道；跨租户协作列为 US-026+。
+
+## US-021F SQLCipher 迁移评估（结论：仍不做）
+
+1. **现状**：SQLite 明文存储，依赖 OS/卷加密（security.md）。备份/恢复为明文文件复制；事件哈希链
+   提供完整性而非机密性。
+2. **触发条件复核**：合规审计（当前不满足要求时再评估）/ 多租户托管（US-021E 落地后再评）/
+   上云托管共享存储 / 客户明确要求静态加密。**当前均不满足**（单机自托管 MVP）。
+3. **迁移成本**：`better-sqlite3-multiple-ciphers` 兼容性、启动注入密钥、v9+ 重加密脚本、
+   性能开销（页级加密）、密钥管理与 `JWT_SECRET` **分离**、备份/恢复流程改造。
+4. **风险**：丢失密钥 = 全量不可恢复；密钥轮换 = 全量重加密（停写窗口）；与 hash chain 无冲突
+   （链是对明文 canonical JSON 的 SHA-256，加密在存储层）。
+5. **结论**：**仍不做**。复审条件：上云托管 / 客户合规要求静态加密 / US-021E 多租户落地 /
+   安全审计提出。届时按 US-022+ 单列，不夹带进其他故事。
