@@ -4,7 +4,7 @@
 
 ## 2026-11-23 — CI（GitHub Actions）
 
-测试基线：**569**（不变；本故事只加 CI 与文档）。
+测试基线：**572**（cli 19 → 22：新增 3 条 args 回归测试；其余不变）。
 
 - 新增 `.github/workflows/ci.yml`：`verify`（npm ci + npm run verify + 两条 audit + demo，
   required）、`web-e2e`（Playwright `--no-save` 安装 + chromium + 真实本地栈 e2e，required）、

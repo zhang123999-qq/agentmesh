@@ -25,8 +25,12 @@
 | US-021E | **设计草案待评审** | 多租户隔离：workspace 一等公民、v9 迁移、RPC 归属表、presence 隔离、拆 US-022…025 |
 | US-021F | **评估完成：仍不做** | SQLCipher：现状/触发/成本/风险/复审条件已记 decisions.md |
 
-测试基线：**569**
-（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 19 / **web 11**）。
+测试基线：**572**
+（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 22 / **web 11**）。
+
+> CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
+> （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷
+> （构建顺序、CLI `-` 开头参数、Web 登录 stale client、isAdmin 未置位），详见 changelog。
 
 > US-021D token 撤销（2026-11-23）：`agent.revokeToken`（admin-only，23/23）；进程内 LRU
 > 撤销表 + `TokenService.verify` 校验（-32001，不泄露）；重启后撤销不保留（文档说明）。
