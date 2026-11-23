@@ -8,6 +8,8 @@ interface SdkContextValue {
   status: ConnectionStatus;
   connect: (url: string, token?: string) => Promise<AgentMeshClient>;
   disconnect: () => void;
+  /** Record a successful authentication (sets isAdmin/agentId for the UI). */
+  markAuthenticated: (agentId: string, role: string) => void;
   isAdmin: boolean;
   agentId: string | null;
 }
@@ -87,6 +89,11 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
     setAgentId(null);
   };
 
+  const markAuthenticated = (id: string, role: string) => {
+    setAgentId(id);
+    setIsAdmin(role === 'admin');
+  };
+
   return (
     <SdkContext.Provider
       value={{
@@ -94,6 +101,7 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
         status,
         connect,
         disconnect,
+        markAuthenticated,
         isAdmin,
         agentId,
       }}

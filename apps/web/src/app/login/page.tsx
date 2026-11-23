@@ -9,7 +9,7 @@ import { mapLoginError } from '@/lib/admin-errors';
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { client, connect } = useSdk();
+  const { client, connect, markAuthenticated } = useSdk();
   const { showToast } = useToast();
   const redirectTo = searchParams.get('redirect') || '/dashboard';
 
@@ -53,6 +53,9 @@ export default function LoginPage() {
         return;
       }
 
+      // Record the authenticated session so the dashboard layout stops showing
+      // "please log in" and renders the admin navigation.
+      markAuthenticated(result.agentId, result.role);
       showToast(`登录成功：${result.agentId}`, 'success');
       router.push(redirectTo);
       router.refresh();
