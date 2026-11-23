@@ -7,6 +7,8 @@ import {
   nextJsonRpcId,
   presenceUpdatePayloadSchema,
   safeParseEventNotification,
+  type AgentRevokeTokenParams,
+  type AgentRevokeTokenResult,
   type EventNotification,
   type JsonRpcParams,
   type MessageHistoryParams,
@@ -393,6 +395,15 @@ export class AgentMeshClient {
 
   listAccounts(params: ListAccountsParams = {}): Promise<AccountListResult> {
     return this.#request(METHODS.agent.list, params);
+  }
+
+  /**
+   * Revoke an issued token by `jti` (admin-only, US-021D). Pass the token to be
+   * revoked; the server derives `jti`/`exp`. A revoked token then fails auth
+   * with `UnauthorizedError` (-32001) until it expires.
+   */
+  revokeToken(params: AgentRevokeTokenParams): Promise<AgentRevokeTokenResult> {
+    return this.#request(METHODS.agent.revokeToken, params);
   }
 
   createChannel(params: CreateChannelParams): Promise<{ channel: ChannelView; seq: number }> {

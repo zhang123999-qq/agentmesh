@@ -440,3 +440,30 @@ README 执行）。故障注入自检：破坏 `markSeqSeen` 恒返回 true → 
 - `/health` 增加 `hashChain` 字段，不暴露 payload/secret。
 - 故障注入自检：把定时器 tick 改成不调用 `runCheck` → “periodic timer actually re-verifies”
   集成用例变红，恢复后全绿（避开 US-021B 的空转陷阱）。
+
+## US-021D token 撤销（5 个决策）
+
+1. **存储**：**进程内 LRU**（`Map< jti, exp >`，上限 1 万，过期懒清理）。**重启后已撤销 token 复活**
+   （在 `exp` 前再次有效），已在 security.md/operations.md 写明。被否决：SQLite 表（需 v9 迁移与
+   跨进程缓存一致性，超出 MVP）；两者并存（复杂度不值）。
+2. **入口**：**新增 RPC `agent.revokeToken`**（admin-only）→ 22/22 变 **23/23**。全仓同步了
+   status.md/architecture.md 的方法表与计数、protocol `METHOD_NAMES` 长度测试。
+   被否决：仅 CLI（跨进程写内存不可行；写库又需迁移）。
+3. **jti 回收/容量**：按 `exp` 自动过期清理；LRU 上限 1 万；满时**淘汰最旧**（绝不拒绝撤销——
+   安全相关应以最新撤销为准），与现有 LRU 限流器策略一致。
+4. **与 JWT_SECRET 轮换**：轮换仍是全量失效；撤销是细粒度补充，两者一致（撤销后再轮换不恢复，
+   因为 token 已因密钥变更失效）。
+5. **可观测性**：撤销成功记 `token.revoked`（含 agentId + jti + expiresAt；jti 为随机不透明 id，
+   可记录；**不记录 token 明文**）。
+
+**实现**：
+- `TokenRevocationRegistry`（auth/revocation.ts）；`TokenService.verify` 验签后检查撤销，命中抛
+  `-32001`（与无效 token 同码，不泄露"已撤销"）。
+- `agent.revokeToken`（modules/revocation.ts）：校验目标 token 取 jti/exp，写入注册表。
+- 协议：`agentRevokeTokenParamsSchema { targetToken }` + result；SDK 新增 `revokeToken()` 类型化方法
+  （字段名 `targetToken` 以避开 SDK 自动注入的 `params.token`）。
+- 测试：registry 过期清理/容量淘汰；TokenService 拒绝/其他 token 有效/重启复活；真实 server 上
+  revoke 后 token 服务拒绝、admin 自助 token 仍有效；故障注入（verify 不查撤销表 → 集成红）。
+
+**SDK 公开 API 变更（点名）**：新增 `AgentMeshClient.revokeToken({ targetToken })`，为保持
+“类型化方法覆盖全部 RPC（23/23）”的既有约束。若不需要可回退为 `sendRaw`，但需同步下调覆盖声明。

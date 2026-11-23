@@ -752,6 +752,8 @@ describe('HTTP transport wiring', () => {
       METHODS.agent.authenticate,
       METHODS.agent.list,
       METHODS.agent.register,
+      // US-021D token revocation (registers with a store-wired server).
+      METHODS.agent.revokeToken,
       // US-007 registers alongside the account module whenever a store is wired.
       METHODS.channel.create,
       METHODS.channel.join,

@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-021D token 撤销
+
+测试基线：**569**（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 287 / cli 19 / web 11）。
+
+- 新 RPC `agent.revokeToken`（admin-only）→ RPC **23/23**；全仓同步方法表与计数
+  （status.md / architecture.md / `METHOD_NAMES` 长度测试 22→23）。
+- `TokenRevocationRegistry`：进程内 LRU（上限 1 万，按 `exp` 懒清理，满时淘汰最旧、绝不拒绝撤销）；
+  `TokenService.verify` 验签后检查撤销，命中返回 `-32001`（与无效 token 同码，不泄露"已撤销"）。
+- 协议：`agentRevokeTokenParamsSchema { targetToken }` + `agentRevokeTokenResultSchema`；
+  SDK 新增 `revokeToken({ targetToken })` 类型化方法（字段名避开 SDK 自动注入的 `params.token`）。
+- 测试（5）：registry 过期清理/容量淘汰；TokenService 拒绝撤销 token + 其他 token 有效 + 重启复活；
+  真实 server 上 revoke 后 token 服务拒绝、admin 自助 token 仍有效；故障注入（verify 不查撤销表 → 集成红）。
+- **重启不保留撤销**（进程内）已写入 security.md/operations.md；整集失效仍靠轮换 `JWT_SECRET`。
+- 回归：`npm run verify` / `audit`×2 / `demo` / `verify:docker` 全过。
+
 ## 2026-11-23 — US-021C 事件哈希链定期校验 + 告警
 
 测试基线：**564**（core 55 / protocol 109 / store 71 / sdk 9 / adapters 7 / mock-agents 1 / server 282 / cli 19 / web 11）。

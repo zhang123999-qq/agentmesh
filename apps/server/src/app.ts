@@ -50,6 +50,8 @@ import {
 } from './modules/tasks.js';
 import { registerSystemModule } from './modules/system.js';
 import { HashChainMonitor } from './modules/hash-chain.js';
+import { registerRevocationModule } from './modules/revocation.js';
+import { TokenRevocationRegistry } from './auth/revocation.js';
 import { createHandlerRegistry, type HandlerRegistry } from './registry.js';
 import { WsGateway, type WsGatewayOptions } from './ws/gateway.js';
 
@@ -102,6 +104,11 @@ export interface BuildServerOptions {
    * Turn it off when the caller installs its own `task.*` stubs.
    */
   readonly registerTasks?: boolean;
+  /**
+   * Register `agent.revokeToken` (US-021D). Default: on whenever a store is
+   * wired. Turn off when the caller installs its own revocation stub.
+   */
+  readonly registerRevocation?: boolean;
   /** Task-module overrides (TTL / id factory / clock) — mostly for tests. */
   readonly tasks?: Omit<
     TasksModuleOptions,
@@ -134,6 +141,8 @@ declare module 'fastify' {
     store?: ServerStore;
     /** JWT issuer/verifier (always present; WS auth in US-006 uses it). */
     tokens: TokenService;
+    /** In-memory token revocation registry (US-021D). */
+    revocations: TokenRevocationRegistry;
     /** Account service, present when the account module is registered. */
     accounts?: AccountsService;
     /** Channel/message service, present when the US-007 module is registered. */
@@ -162,12 +171,17 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const logger = options.logger ?? createLogger({ level: config.logLevel });
   const registry = options.registry ?? createHandlerRegistry();
 
+  // In-memory token revocation registry (US-021D); shared by the token service
+  // (enforcement inside verify) and the `agent.revokeToken` handler.
+  const revocations = new TokenRevocationRegistry();
+
   const tokens =
     options.tokens ??
     createTokenService({
       secret: config.jwtSecret,
       expiresInSeconds: config.jwtExpiresInSeconds,
       issuer: config.jwtIssuer,
+      revocations,
     });
 
   // `system.error` notifications fan out to the caller's hook (if any) and to
@@ -204,11 +218,18 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   app.decorate('dispatcher', dispatcher);
   app.decorate('startedAt', startedAt);
   app.decorate('tokens', tokens);
+  app.decorate('revocations', revocations);
 
   // ---- feature modules ---------------------------------------------------
   const store = options.store;
   if (store !== undefined) {
     app.decorate('store', store);
+    // `agent.revokeToken` (US-021D): registers with a store-wired server (the
+    // same invariant as the other feature modules); admin-gated in the handler.
+    // Revocation is enforced inside `tokens.verify`.
+    if (options.registerRevocation !== false) {
+      registerRevocationModule(registry, { tokens, revocations, logger });
+    }
     if (options.registerAccounts !== false) {
       // Reuse the decorated DAO so account writes travel through the same
       // `onAppend` feed the WS gateway subscribes to (single bus per process).

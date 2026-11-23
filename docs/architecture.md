@@ -79,7 +79,7 @@ docs                本目录
   - Origin allow-list（CSWSH 防护）与 1 MiB `maxPayload`。
 - 业务模块：账号（US-005）、频道/消息与历史（US-007/010）、任务/竞标/授标/执行/
   审核/改派/取消（US-008/009/011/013）。
-- 已注册 21 / 22 个协议方法；仅 `system.subscribe` 未实现（见 [status.md](status.md)）。
+- 已注册 **23 / 23** 个协议方法（含 US-020 `system.subscribe`、US-021D `agent.revokeToken`）。
 - 生命周期：`open → bidding → awarded → in_progress → review → done`；
   `review` 可 approve→done / reject|request-revision→in_progress；
   `awarded/in_progress/review` 可 reassign→in_progress；

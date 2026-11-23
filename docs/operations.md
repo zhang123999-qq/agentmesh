@@ -137,3 +137,14 @@ curl -kf https://localhost:8443/health
   容器内 seed-admin、容器卷持久化与恢复演练，均需在具备 Docker 的环境执行。
 - 复现步骤：安装 Docker Engine ≥24 + Compose v2，按本节上方的 Docker 部署命令执行，
   并用 `docker compose logs server` 检查启动/关闭日志。
+
+## token 撤销（US-021D）
+
+- admin 通过 `agent.revokeToken { targetToken }` 撤销单个 token（`jti` 从 token 解出；不记录明文）。
+- 撤销在**进程内存**中生效：仅对当前进程有效，**重启后失效**（token 在 `exp` 前复活）。
+- 撤销命中统一返回 `-32001`（不暴露"已撤销"，避免探测）。
+- 紧急整集失效：轮换 `JWT_SECRET` 并重启（见「JWT_SECRET 轮换」）；撤销是细粒度补充。
+- 示例（SDK）：
+  ```ts
+  await adminClient.revokeToken({ targetToken: compromisedToken });
+  ```

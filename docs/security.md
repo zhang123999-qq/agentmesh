@@ -21,8 +21,10 @@
   `alg:none`、`alg:RS256`、错误 iss/aud、错误签名、过期 token 全部 `-32001`。
 - **payload**：仅 `sub` / `role` / `workspaceId` / `iss` / `aud` / `iat` / `exp` /
   `jti`。HS256 payload 是 Base64URL，持有 token 即可解码；不要放敏感数据。
-- **撤销**：未实现。泄露 token 在 `exp`（默认 3600s）前有效；轮换
-  `JWT_SECRET` 会让所有 token 立即失效，需要维护窗口。
+- **撤销（US-021D）**：`agent.revokeToken`（admin-only）按 `jti` 撤销单个 token，撤销后在
+  `exp` 前校验即失败（`-32001`，不泄露"已撤销"语义）。存储为**进程内存 LRU**（上限 1 万，
+  过期懒清理）；**重启后撤销不保留**（token 在 `exp` 前复活）——整集失效仍靠轮换
+  `JWT_SECRET`（需维护窗口）。撤销入口为 RPC（23/23），无 CLI。
 - **未来 RS256**：仅当第三方需独立验签或需要零停机轮换时迁移；步骤为生成密钥对、
   加 `kid`、发布 JWKS、双算法过渡、移除 HS256。当前故意没有 `kid`/JWKS 代码。
 

@@ -16,6 +16,7 @@ export const METHODS = {
     register: 'agent.register',
     authenticate: 'agent.authenticate',
     list: 'agent.list',
+    revokeToken: 'agent.revokeToken',
   },
   channel: {
     create: 'channel.create',
@@ -52,6 +53,7 @@ export const METHOD_NAMES = [
   METHODS.agent.register,
   METHODS.agent.authenticate,
   METHODS.agent.list,
+  METHODS.agent.revokeToken,
   METHODS.channel.create,
   METHODS.channel.join,
   METHODS.channel.leave,

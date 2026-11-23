@@ -106,3 +106,24 @@ export const systemSubscribeParamsSchema = z.object({
   types: z.array(z.string().min(1)).optional(),
 });
 export type SystemSubscribeParams = z.infer<typeof systemSubscribeParamsSchema>;
+
+/**
+ * JSON-RPC params for `agent.revokeToken` (US-021D, admin-only).
+ *
+ * Revokes a single issued JWT by its `jti` until it expires. The caller supplies
+ * the target token being revoked; the server derives `jti`/`exp` from it and
+ * never logs the token. The field is named `targetToken` (not `token`) because
+ * the SDK reserves `params.token` for the caller's own credential.
+ */
+export const agentRevokeTokenParamsSchema = z.object({
+  targetToken: z.string().min(1),
+});
+export type AgentRevokeTokenParams = z.infer<typeof agentRevokeTokenParamsSchema>;
+
+/** Result of `agent.revokeToken`. */
+export const agentRevokeTokenResultSchema = z.object({
+  revoked: z.literal(true),
+  jti: z.string().min(1),
+  expiresAt: z.number().int().nonnegative(),
+});
+export type AgentRevokeTokenResult = z.infer<typeof agentRevokeTokenResultSchema>;

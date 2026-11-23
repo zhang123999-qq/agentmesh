@@ -27,6 +27,7 @@ import { jwtVerify, SignJWT } from 'jose';
 import { errors as joseErrors } from 'jose';
 
 import { isRole, type Role } from './roles.js';
+import type { TokenRevocationRegistry } from './revocation.js';
 
 /** Only one algorithm is accepted; nothing else can be negotiated in. */
 export const TOKEN_ALGORITHM = 'HS256';
@@ -74,6 +75,11 @@ export interface TokenServiceOptions {
   readonly audience?: string;
   /** Injectable clock (epoch ms) for deterministic tests. */
   readonly clock?: () => number;
+  /**
+   * Optional revocation registry (US-021D). When present, `verify` rejects any
+   * token whose `jti` has been revoked (still surfaced as `-32001`).
+   */
+  readonly revocations?: TokenRevocationRegistry;
 }
 
 /** Thrown as `-32001`; `data.reason` tells clients whether to re-authenticate. */
@@ -94,6 +100,7 @@ export class TokenService {
   readonly #issuer: string;
   readonly #audience: string;
   readonly #clock: () => number;
+  readonly #revocations: TokenRevocationRegistry | undefined;
 
   constructor(options: TokenServiceOptions) {
     if (typeof options.secret !== 'string' || options.secret.length === 0) {
@@ -108,6 +115,7 @@ export class TokenService {
     this.#issuer = options.issuer ?? DEFAULT_TOKEN_ISSUER;
     this.#audience = options.audience ?? DEFAULT_TOKEN_AUDIENCE;
     this.#clock = options.clock ?? (() => Date.now());
+    this.#revocations = options.revocations;
   }
 
   get expiresInSeconds(): number {
@@ -199,13 +207,19 @@ export class TokenService {
         ? payload.workspaceId
         : DEFAULT_TOKEN_WORKSPACE;
 
+    const tokenId = typeof payload.jti === 'string' ? payload.jti : undefined;
+    if (this.#revocations?.isRevoked(tokenId)) {
+      // Same -32001 as an invalid token: never reveal "revoked" (anti-probing).
+      throw unauthorized('invalid_token', 'Invalid or expired token');
+    }
+
     return {
       agentId,
       role: payload.role,
       workspaceId,
       ...(typeof payload.iat === 'number' ? { issuedAt: payload.iat } : {}),
       ...(typeof payload.exp === 'number' ? { expiresAt: payload.exp } : {}),
-      ...(typeof payload.jti === 'string' ? { tokenId: payload.jti } : {}),
+      ...(tokenId !== undefined ? { tokenId } : {}),
     };
   }
 }
