@@ -69,7 +69,7 @@ import {
   type TaskStatus,
   type TasksDao,
 } from '@agentmesh/store';
-import { compactBids, tagCounter, bidStableFrontier } from '@agentmesh/core';
+import { tagCounter } from '@agentmesh/core';
 import { serializeError } from '../logging.js';
 import type { Logger } from 'pino';
 
@@ -1956,14 +1956,29 @@ export class TasksService {
   /**
    * Compact the bid OR-Set for a specific task using the current stableFrontier.
    * This is called by the compaction timer.
+   *
+   * The frontier must advance to the highest counter among *tombstoned* rows:
+   * `bidStableFrontier` only reads the existing cursor column, so it can never
+   * move the cursor on its own. Single-writer SQLite means every present
+   * tombstone is stable, so the max tombstone counter is the correct watermark.
+   * Live add tags are never touched.
    */
   compactTaskBids(
     taskId: string,
     workspaceId: string = this.#workspaceId,
   ): { compacted: boolean; removedCount: number; newFrontier: number } {
     const currentFrontier = this.#taskBids.getStableFrontier(taskId, workspaceId);
-    const allBidsForFrontier = this.#taskBids.listByTask(taskId, { workspaceId, includeTombstones: true });
-    const newFrontier = bidStableFrontier(allBidsForFrontier);
+    const allBidsForFrontier = this.#taskBids.listByTask(taskId, {
+      workspaceId,
+      includeTombstones: true,
+    });
+
+    let newFrontier = currentFrontier;
+    for (const row of allBidsForFrontier) {
+      if (!row.tombstone) continue;
+      const counter = tagCounter(`${row.createdAt}|${row.id}`);
+      if (counter > newFrontier) newFrontier = counter;
+    }
 
     if (newFrontier === currentFrontier) {
       return { compacted: false, removedCount: 0, newFrontier: currentFrontier };
@@ -1975,23 +1990,20 @@ export class TasksService {
         workspaceId,
         includeTombstones: true,
       });
-      // compactBids is called for its side-effects on the OR-Set logic
-      compactBids(allBids, newFrontier);
 
       let removedCount = 0;
       for (const row of allBids) {
-        const tag = `${row.createdAt}|${row.id}`;
-        if (row.tombstone && tagCounter(tag) <= newFrontier) {
+        if (row.tombstone && tagCounter(`${row.createdAt}|${row.id}`) <= newFrontier) {
           this.#taskBids.delete(row.id, workspaceId);
           removedCount += 1;
         }
       }
-      // Advance the stable frontier cursor
+      // Advance the stable frontier cursor (monotonic; never moves backwards).
       this.#taskBids.setStableFrontier(taskId, newFrontier, workspaceId);
-      return { removedCount, newFrontier };
+      return { removedCount };
     });
 
-    return { compacted: true, removedCount: result.removedCount, newFrontier: result.newFrontier };
+    return { compacted: true, removedCount: result.removedCount, newFrontier };
   }
 
   /**
@@ -2005,14 +2017,11 @@ export class TasksService {
     let compactedTasks = 0;
     let totalRemoved = 0;
 
-    // Get all tasks that have bid data
-    const tasksWithBids = new Set<string>();
-    const allBids = this.#taskBids.listByTask('', { workspaceId: this.#workspaceId, includeTombstones: true });
-    for (const bid of allBids) {
-      tasksWithBids.add(bid.taskId);
-    }
-
-    for (const taskId of tasksWithBids) {
+    // Enumerate real task ids that have bid rows. Passing an empty task id to
+    // `listByTask` matched nothing, so a previous implementation never
+    // compacted anything (US-021B P1 verification).
+    const taskIds = this.#taskBids.listTaskIds(workspaceId);
+    for (const taskId of taskIds) {
       try {
         const result = this.compactTaskBids(taskId, workspaceId);
         if (result.compacted) {
@@ -2026,6 +2035,11 @@ export class TasksService {
     }
 
     return { compactedTasks, totalRemoved, errors };
+  }
+
+  /** Whether the compaction timer is currently scheduled (tests / diagnostics). */
+  isCompactionTimerRunning(): boolean {
+    return this.#compactionTimer !== undefined;
   }
 
   /**
@@ -2066,6 +2080,9 @@ export class TasksService {
 
     timer.unref?.();
     this.#compactionTimer = timer;
+    // Structured signal observed by `docker/verify-local.mjs` so timer
+    // start/clear is asserted explicitly rather than inferred from exit codes.
+    this.#logger?.info?.({ intervalMs, msg: 'task.compaction.timer.started' });
   }
 
   /**
@@ -2075,6 +2092,7 @@ export class TasksService {
     if (this.#compactionTimer !== undefined) {
       clearInterval(this.#compactionTimer);
       this.#compactionTimer = undefined;
+      this.#logger?.info?.({ msg: 'task.compaction.timer.cleared' });
     }
   }
 }

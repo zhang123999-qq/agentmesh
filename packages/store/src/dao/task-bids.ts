@@ -205,6 +205,22 @@ export class TaskBidsDao {
     return rows.map(mapBid);
   }
 
+  /**
+   * Distinct task ids that currently have any bid rows in the workspace
+   * (live or tombstoned). The compaction job iterates these to reclaim
+   * per-task tombstone ranges — passing a sentinel task id to {@link listByTask}
+   * matched nothing, so the scheduler must enumerate real ids here.
+   */
+  listTaskIds(workspaceId: string = DEFAULT_WORKSPACE_ID): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT task_id FROM task_bids
+          WHERE workspace_id = ? ORDER BY task_id ASC`,
+      )
+      .all(workspaceId) as Array<{ task_id: string }>;
+    return rows.map((row) => row.task_id);
+  }
+
   update(
     id: string,
     patch: UpdateTaskBidPatch,

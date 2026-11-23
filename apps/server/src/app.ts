@@ -316,6 +316,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       demoMode: config.demoMode,
       openTtlSeconds: options.tasks?.openTtlSeconds ?? config.taskOpenTtlSeconds,
       compactionIntervalMs: options.tasks?.compactionIntervalMs ?? config.taskBidCompactionIntervalSeconds * 1000,
+      // Give the module the real logger so compaction start/clear/errors are
+      // observable (verify:docker asserts the timer lifecycle from these lines).
+      logger: options.tasks?.logger ?? logger,
     });
     app.decorate('tasks', tasks);
 
