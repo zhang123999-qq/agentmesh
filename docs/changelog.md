@@ -2,6 +2,20 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-024 presence 按 workspace 分片
+
+测试基线：**581**（server 292 → 293；其余不变）。
+
+- 网关 presence 内存结构改为 `#connections: Map<workspaceId, Map<agentId, Set<WsSession>>>`；
+  `#broadcastPresence` / `#maybeBroadcastOffline` / `#attachAgent` / `#detachAgent` /
+  `publishEventToAgents` / `onlineAgents` / `socketsFor` 全部带 workspace 维度。
+- online/offline 广播按 workspace 过滤（ws-b 的 socket 收不到 default 的存在事件）。
+- Web：events 流消费 `presence.update`，服务端分片后天然只推送本租户，无需改 UI；切换 workspace 归 US-025。
+- 不新增 RPC（23/23）；presence 仍 ephemeral（不写 LWW，US-012 库级能力未变）。
+- 测试（+1，ws-gateway 30→31）：两个 observer（default/ws-b）；ws-b agent 上线只被 ws-b 收到、
+  default 不收到；反向同理；`onlineAgents(ws)` 隔离；offline 仅本 workspace。故障注入：去掉过滤→红，恢复绿。
+- 回归：`npm run verify` 全绿；CI（verify / web-e2e / docker）随提交复跑。
+
 ## 2026-11-23 — US-023 多租户 RPC + 鉴权
 
 测试基线：**580**（server 287 → 292；其余不变）。

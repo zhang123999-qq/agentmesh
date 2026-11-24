@@ -73,8 +73,8 @@ docs                本目录
   固定作用域，token 覆盖任何 `X-Workspace-Id` 请求头（无法靠改头扩权）。
 - 所有 RPC 把该 `workspaceId` 传给服务层（`ctx.workspaceId`），store 查询按此过滤；跨租户读/资源
   返回 **-32004**（不泄露存在性），跨租户动作/撤销返回 **-32002**。
-- `agent.register` 无 token → 写 `default`；多 workspace 注册/租户创建归 US-025。presence 仍全局共用
-  直到 US-024 分片。
+- `agent.register` 无 token → 写 `default`；多 workspace 注册/租户创建归 US-025。presence 已按
+  `workspaceId → agentId → sockets` 分片（US-024），online/offline 广播按 workspace 过滤。
 
 ## 传输与模块
 

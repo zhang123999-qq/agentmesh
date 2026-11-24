@@ -25,10 +25,11 @@
 | US-021E | **已锁死（2026-11-23）** | 多租户设计：workspace 一等公民、23 RPC 归属表、presence 隔离、拆 US-022…025 |
 | US-021F | **评估完成：仍不做** | SQLCipher：现状/触发/成本/风险/复审条件已记 decisions.md |
 | US-022 | **完成（本地验证）** | v9 多租户 schema：`workspaces` 表 + seed default；`channel_members` PK 加 workspace 维度；无回填；前向不可逆（先备份） |
-| US-023 | **完成（本地验证）** | RPC 按 token 作用域：channels create/join/leave/send 补 ctx.workspaceId；跨租户读 -32004 / 撤销 -32002；system.subscribe admin-only；presence 过渡态待 US-024 |
+| US-023 | **完成（本地验证）** | RPC 按 token 作用域：channels create/join/leave/send 补 ctx.workspaceId；跨租户读 -32004 / 撤销 -32002；system.subscribe admin-only |
+| US-024 | **完成（本地验证）** | presence 按 workspace 分片：`#connections` 分片、online/offline 广播按 workspace 过滤；Web events 流天然只收本租户 |
 
-测试基线：**580**
-（core 55 / protocol 109 / store **74** / sdk 9 / adapters 7 / mock-agents 1 / server **292** / cli 22 / **web 11**）。
+测试基线：**581**
+（core 55 / protocol 109 / store **74** / sdk 9 / adapters 7 / mock-agents 1 / server **293** / cli 22 / **web 11**）。
 schema 版本：**v9**（US-022 多租户 schema）。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
@@ -205,7 +206,7 @@ US-018 的关键语义：
 | 项 | 归属 | 影响 |
 | --- | --- | --- |
 | `system.subscribe` | **US-020 完成** | admin opt-in domain-only 事件；现有 notification 广播不变；Web 默认只用 SDK `on()` |
-| 多租户：RPC 已按 token 作用域（US-023）；presence 仍全局共用 | US-024/025 | presence 需 workspace 分片（US-024）；租户创建/跨租户登记归 US-025 |
+| 多租户：schema v9 + RPC 作用域 + presence 分片已完成（US-022/023/024）；缺租户创建/跨租户登记 | US-025 | register 仅写 default；无 workspace.create / 邀请码 / 租户 admin / 配额 |
 | 哈希链无外部锚定（US-021C 已可定期校验） | US-022+ | 链尾篡改不可检测；运行时已能告警 mismatch |
 | token 撤销无持久化（US-021D 完成，仅进程内） | **已决策：保持进程内（2026-11-23）** | 重启后已撤销 token 在 `exp` 前复活；复审条件（多实例/合规/多租户）见 decisions.md |
 | SQLite 明文（US-021F 复核：仍不做，复审条件已记） | US-022+ | 依赖 OS/卷加密；触发条件见 decisions.md |

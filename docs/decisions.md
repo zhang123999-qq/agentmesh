@@ -677,3 +677,28 @@ token 的 workspace == 调用者，跨租户 -32002；dispatcher 的 token-pin �
 `channel.list` 跨租户为空；ws-b admin `channel.create` 落在 ws-b（default 看不到）；跨租户 revoke → -32002、
 同租户可撤销；`system.subscribe` 非 admin → -32002；default 注册/使用向后兼容。
 **故障注入自检**：dispatcher 改为忽略 token workspace → 3 条隔离测试变红，恢复后全绿。
+
+## US-024 presence 按 workspace 分片（5 个决策）
+
+> 前置：US-023 决策 4 把 presence 全局共用记为过渡态；本故事收口。
+
+1. **内存结构**：**方案 A** `Map<workspaceId, Map<agentId, Set<WsSession>>>`（按租户分片）。
+   被否决：B 复合键 `Map<"ws:agent", …>`（清理/遍历不清晰）；C 全局 Map + 查询过滤（内存不隔离，
+   大租户拖累小租户）。
+2. **跨 workspace 可见性**：**admin 也只能看自己 workspace 的 online 状态**；跨租户可见性归 US-025 运维。
+   被否决：admin 全局可见（扩大泄露面，且与“token 固定作用域”冲突）。
+3. **与 US-012 LWW 的关系**：网关 presence 仍是**进程内 ephemeral + 分片**，不写入 LWW 事件日志；
+   **LWW presence 仍是库级能力、未被网关消费**（与 US-012 偏离 1 一致：单进程不引入无界全局 map）。
+4. **Web 租户切换**：**不新增 RPC**；Web 使用当前 token 的 workspace。Web 的 events 流本就消费
+   `presence.update`，服务端分片后只推送本 workspace，无需改 UI。真正的“切换 workspace”归 US-025。
+5. **过渡期兼容/测试迁移**：现有 gateway presence 测试在单 workspace 下语义不变（默认 workspace）；
+   新增跨租户隔离测试；**offline 广播按 workspace**；故障注入自检（去掉 workspace 过滤→隔离测试红）。
+
+**实现**：`#connections` 改为按 `workspaceId → agentId → sockets` 分片；`#broadcastPresence` /
+`#maybeBroadcastOffline` / `#attachAgent` / `#detachAgent` / `publishEventToAgents` /
+`onlineAgents` / `socketsFor` 全部带 workspace 维度；`bindSession` 解析 `auth.workspaceId ?? session.workspaceId`；
+`onClose` 用 `session.workspaceId`。
+
+**测试（+1，server 292→293，共 581）**：两个 observer（default / ws-b）各一 socket；ws-b agent 上线只
+被 ws-b observer 收到、default 不收到；default agent 上线只被 default 收到；`onlineAgents('ws-b')` 含
+agt_b1、`onlineAgents('default')` 不含；offline 仅本 workspace。故障注入：去掉过滤→该测试红，恢复绿。

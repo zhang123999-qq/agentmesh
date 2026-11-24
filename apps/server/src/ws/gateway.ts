@@ -202,7 +202,8 @@ export class WsGateway {
   readonly #wss: WebSocketServer;
   readonly #sessions = new Set<WsSession>();
   /** agentId → live sockets (the connection registry). */
-  readonly #connections = new Map<string, Set<WsSession>>();
+  /** workspaceId → agentId → live sockets (US-024: presence sharded per tenant). */
+  readonly #connections = new Map<string, Map<string, Set<WsSession>>>();
   /** agentId → shared message bucket (bounded, oldest evicted). */
   readonly #agentBuckets: TokenBucketRegistry;
   /** Per-socket promise chain, so frames are handled in arrival order. */
@@ -314,14 +315,14 @@ export class WsGateway {
     }
   }
 
-  /** Live sockets for an agent (empty set when offline). */
-  socketsFor(agentId: string): Set<WsSession> {
-    return this.#connections.get(agentId) ?? new Set<WsSession>();
+  /** Live sockets for an agent in a workspace (empty set when offline). */
+  socketsFor(agentId: string, workspaceId: string = this.#workspaceId): Set<WsSession> {
+    return this.#connections.get(workspaceId)?.get(agentId) ?? new Set<WsSession>();
   }
 
-  /** Agent ids with at least one open socket. */
-  onlineAgents(): string[] {
-    return [...this.#connections.keys()].sort();
+  /** Agent ids with at least one open socket in the workspace. */
+  onlineAgents(workspaceId: string = this.#workspaceId): string[] {
+    return [...(this.#connections.get(workspaceId)?.keys() ?? [])].sort();
   }
 
   get sessionCount(): number {
@@ -427,9 +428,10 @@ export class WsGateway {
   /** Bind identity, register the socket and announce it. */
   #bindSession(session: WsSession, auth: AuthContext): void {
     const previous = session.agentId;
+    const workspaceId = auth.workspaceId ?? session.workspaceId;
     const alreadyBound =
       previous === auth.agentId &&
-      (this.#connections.get(auth.agentId)?.has(session) ?? false);
+      (this.#connections.get(workspaceId)?.get(auth.agentId)?.has(session) ?? false);
 
     session.bind(auth);
     session.agentBucket = this.#bucketForAgent(auth.agentId);
@@ -440,12 +442,12 @@ export class WsGateway {
     }
 
     if (previous !== undefined) {
-      this.#detachAgent(session, previous);
-      this.#maybeBroadcastOffline(previous);
+      this.#detachAgent(session, previous, session.workspaceId);
+      this.#maybeBroadcastOffline(previous, session.workspaceId);
     }
-    this.#attachAgent(session, auth.agentId);
+    this.#attachAgent(session, auth.agentId, workspaceId);
     this.#sendWelcome(session);
-    this.#broadcastPresence(auth.agentId, 'online', session);
+    this.#broadcastPresence(auth.agentId, 'online', workspaceId, session);
     this.#logger.info({
       sessionId: session.id,
       agentId: auth.agentId,
@@ -455,20 +457,28 @@ export class WsGateway {
     });
   }
 
-  #attachAgent(session: WsSession, agentId: string): void {
-    const sockets = this.#connections.get(agentId);
+  #attachAgent(session: WsSession, agentId: string, workspaceId: string): void {
+    let byAgent = this.#connections.get(workspaceId);
+    if (byAgent === undefined) {
+      byAgent = new Map();
+      this.#connections.set(workspaceId, byAgent);
+    }
+    const sockets = byAgent.get(agentId);
     if (sockets === undefined) {
-      this.#connections.set(agentId, new Set([session]));
+      byAgent.set(agentId, new Set([session]));
       return;
     }
     sockets.add(session);
   }
 
-  #detachAgent(session: WsSession, agentId: string): void {
-    const sockets = this.#connections.get(agentId);
+  #detachAgent(session: WsSession, agentId: string, workspaceId: string): void {
+    const byAgent = this.#connections.get(workspaceId);
+    if (byAgent === undefined) return;
+    const sockets = byAgent.get(agentId);
     if (sockets === undefined) return;
     sockets.delete(session);
-    if (sockets.size === 0) this.#connections.delete(agentId);
+    if (sockets.size === 0) byAgent.delete(agentId);
+    if (byAgent.size === 0) this.#connections.delete(workspaceId);
   }
 
   #bucketForAgent(agentId: string): TokenBucket {
@@ -481,8 +491,8 @@ export class WsGateway {
     this.#chains.delete(session.id);
     const agentId = session.agentId;
     if (agentId !== undefined) {
-      this.#detachAgent(session, agentId);
-      this.#maybeBroadcastOffline(agentId);
+      this.#detachAgent(session, agentId, session.workspaceId);
+      this.#maybeBroadcastOffline(agentId, session.workspaceId);
     }
     this.#logger.info({
       sessionId: session.id,
@@ -900,20 +910,23 @@ export class WsGateway {
   #broadcastPresence(
     agentId: string,
     status: PresenceUpdatePayload['status'],
+    workspaceId: string,
     origin?: WsSession,
   ): void {
     const frame = presenceNotification({ agentId, status, at: Date.now() });
     for (const session of this.#sessions) {
       if (session === origin) continue;
       if (!session.authenticated) continue;
+      // US-024: presence never crosses a workspace boundary.
+      if (session.workspaceId !== workspaceId) continue;
       session.send(frame);
     }
   }
 
-  /** Offline is only announced once the agent has no socket left. */
-  #maybeBroadcastOffline(agentId: string): void {
-    if (this.#connections.has(agentId)) return;
-    this.#broadcastPresence(agentId, 'offline');
+  /** Offline is only announced once the agent has no socket left in that workspace. */
+  #maybeBroadcastOffline(agentId: string, workspaceId: string): void {
+    if (this.#connections.get(workspaceId)?.has(agentId)) return;
+    this.#broadcastPresence(agentId, 'offline', workspaceId);
   }
 
   // ---------------------------------------------------------------- broadcast
@@ -970,7 +983,7 @@ export class WsGateway {
     const frame = eventNotification(event);
     let delivered = 0;
     for (const agentId of agentIds) {
-      const sockets = this.#connections.get(agentId);
+      const sockets = this.#connections.get(event.workspaceId)?.get(agentId);
       if (sockets === undefined) continue;
       for (const session of sockets) {
         if (!session.authenticated) continue;

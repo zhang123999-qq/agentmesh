@@ -106,5 +106,7 @@
 - **跨租户防护**：读/资源类（`task.get`/`message.history`/`channel.join` 等）对他租户资源返回
   **-32004**（避免探测存在性）；动作/角色类（如 `agent.revokeToken` 跨租户）返回 **-32002**。
   `channel.create/join/leave/send` 已改为按 `ctx.workspaceId` 作用域（此前用服务默认，属越权面）。
-- **已知过渡态**：`presence` 仍全局共用（不按 workspace 过滤），US-024 修复；`agent.register` 仅写
-  `default`，租户创建入口归 US-025。`seq` 仍全局唯一（按 workspace 过滤读取）。
+- **presence 隔离（US-024 已完成）**：网关 presence 内存结构按 `workspaceId → agentId → sockets`
+  分片；online/offline 广播按 workspace 过滤，跨租户 socket 收不到彼此的存在事件。
+- **已知过渡态**：`agent.register` 仍仅写 `default`，租户创建/跨租户登记归 US-025。`seq` 仍全局唯一
+  （按 workspace 过滤读取）。

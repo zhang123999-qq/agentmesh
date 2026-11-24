@@ -1223,3 +1223,61 @@ describe('ws live task lifecycle notifications', () => {
     await adminClient.close();
   });
 });
+
+describe('ws presence workspace isolation (US-024)', () => {
+  it('never crosses a workspace boundary (online, offline, and onlineAgents)', async () => {
+    const harness = await startHarness();
+    const tokens = harness.app.tokens;
+
+    const defaultObserverTok = await tokens.sign({
+      agentId: 'obs_default',
+      role: 'admin',
+      workspaceId: 'default',
+    });
+    const wsbObserverTok = await tokens.sign({
+      agentId: 'obs_b',
+      role: 'admin',
+      workspaceId: 'ws-b',
+    });
+    const defaultObserver = await TestClient.open(harness.url, authHeader(defaultObserverTok));
+    await defaultObserver.waitFor((f) => f.type === 'welcome', { label: 'welcome default obs' });
+    const wsbObserver = await TestClient.open(harness.url, authHeader(wsbObserverTok));
+    await wsbObserver.waitFor((f) => f.type === 'welcome', { label: 'welcome ws-b obs' });
+
+    const isPresence = (frame: Frame, agentId: string, status: string): boolean =>
+      frame.method === 'presence.update' &&
+      (frame.params as { agentId?: string; status?: string } | undefined)?.agentId === agentId &&
+      (frame.params as { agentId?: string; status?: string } | undefined)?.status === status;
+
+    // A ws-b agent connects: only the ws-b observer sees its online presence.
+    const wsbAgentTok = await tokens.sign({
+      agentId: 'agt_b1',
+      role: 'agent',
+      workspaceId: 'ws-b',
+    });
+    const wsbAgent = await TestClient.open(harness.url, authHeader(wsbAgentTok));
+    await wsbObserver.waitFor((f) => isPresence(f, 'agt_b1', 'online'), { label: 'wsb online' });
+    await delay(100);
+    expect(defaultObserver.framesOf((f) => isPresence(f, 'agt_b1', 'online'))).toHaveLength(0);
+    expect(harness.gateway.onlineAgents('ws-b')).toContain('agt_b1');
+    expect(harness.gateway.onlineAgents('default')).not.toContain('agt_b1');
+
+    // A default agent connects: only the default observer sees it.
+    const defaultAgentTok = await tokens.sign({ agentId: 'agt_d1', role: 'agent' });
+    const defaultAgent = await TestClient.open(harness.url, authHeader(defaultAgentTok));
+    await defaultObserver.waitFor((f) => isPresence(f, 'agt_d1', 'online'), { label: 'default online' });
+    await delay(100);
+    expect(wsbObserver.framesOf((f) => isPresence(f, 'agt_d1', 'online'))).toHaveLength(0);
+
+    // Offline for agt_b1 reaches only the ws-b observer.
+    const beforeClose = defaultObserver.frames.length;
+    await wsbAgent.close();
+    await wsbObserver.waitFor((f) => isPresence(f, 'agt_b1', 'offline'), { label: 'wsb offline' });
+    await delay(100);
+    expect(defaultObserver.frames.slice(beforeClose).some((f) => isPresence(f, 'agt_b1', 'offline'))).toBe(
+      false,
+    );
+
+    await Promise.all([defaultObserver.close(), wsbObserver.close(), defaultAgent.close()]);
+  });
+});
