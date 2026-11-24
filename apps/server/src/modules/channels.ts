@@ -400,7 +400,11 @@ export class ChannelsService {
    * channel can never exist without its creator in it (nor with an event log
    * that disagrees with the projection).
    */
-  create(input: { readonly name: string }, actor: AuthContext): CreateChannelResult {
+  create(
+    input: { readonly name: string },
+    actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
+  ): CreateChannelResult {
     const name = input.name.trim();
     if (name.length === 0) {
       throw invalidParams('name must not be empty', 'name');
@@ -422,20 +426,20 @@ export class ChannelsService {
         name,
         createdBy: actor.agentId,
         createdAt,
-        workspaceId: this.#workspaceId,
+        workspaceId,
       });
       this.#members.add({
         channelId,
         agentId: actor.agentId,
         joinedAt: createdAt,
-        workspaceId: this.#workspaceId,
+        workspaceId,
       });
       const createdEvent = this.#events.append({
         aggregateId,
         type: 'channel.created',
         payload: { channelId, name, createdBy: actor.agentId, createdAt },
         ts: createdAt,
-        workspaceId: this.#workspaceId,
+        workspaceId,
       });
       // The creator's membership is a fact of the channel's history, not an
       // implicit side effect, so replaying the aggregate rebuilds the same
@@ -445,13 +449,13 @@ export class ChannelsService {
         type: 'channel.member.joined',
         payload: { channelId, agentId: actor.agentId, joinedAt: createdAt },
         ts: createdAt,
-        workspaceId: this.#workspaceId,
+        workspaceId,
       });
       return { channel, event: createdEvent };
     });
 
     return {
-      channel: this.#view(created.channel.id, actor.agentId),
+      channel: this.#view(created.channel.id, actor.agentId, workspaceId),
       seq: created.event.seq,
     };
   }
@@ -468,8 +472,9 @@ export class ChannelsService {
   join(
     input: { readonly channelId: string; readonly agentId?: string },
     actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
   ): JoinChannelResult {
-    const channel = this.#requireChannel(input.channelId);
+    const channel = this.#requireChannel(input.channelId, workspaceId);
     const agentId = input.agentId ?? actor.agentId;
     if (agentId !== actor.agentId) {
       requireRole({ auth: actor }, ADMIN_ROLES);
@@ -524,8 +529,9 @@ export class ChannelsService {
   leave(
     input: { readonly channelId: string; readonly agentId?: string },
     actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
   ): LeaveChannelResult {
-    const channel = this.#requireChannel(input.channelId);
+    const channel = this.#requireChannel(input.channelId, workspaceId);
     const agentId = input.agentId ?? actor.agentId;
     if (agentId !== actor.agentId) {
       requireRole({ auth: actor }, ADMIN_ROLES);
@@ -597,8 +603,9 @@ export class ChannelsService {
   send(
     input: { readonly channelId: string; readonly body: string },
     actor: AuthContext,
+    workspaceId: string = this.#workspaceId,
   ): SendMessageResult {
-    const channel = this.#requireChannel(input.channelId);
+    const channel = this.#requireChannel(input.channelId, workspaceId);
     // A non-member must not even learn whether the channel accepts writes:
     // the rejection below is a plain `-32002`, identical to a role rejection.
     if (!this.#members.isMember(channel.id, actor.agentId, channel.workspaceId)) {
@@ -799,7 +806,7 @@ export function registerChannelsModule(
       const auth = requireRole(ctx, CHANNEL_WRITE_ROLES);
       const input = asParamsObject(params, METHODS.channel.create);
       const name = readRequiredString(input, 'name', MAX_CHANNEL_NAME_LENGTH);
-      const result = service.create({ name }, auth);
+      const result = service.create({ name }, auth, ctx.workspaceId);
       ctx.logger.info({
         channelId: result.channel.channelId,
         agentId: auth.agentId,
@@ -821,6 +828,7 @@ export function registerChannelsModule(
       const result = service.join(
         agentId === undefined ? { channelId } : { channelId, agentId },
         auth,
+        ctx.workspaceId,
       );
       ctx.logger.info({
         channelId: result.channelId,
@@ -843,6 +851,7 @@ export function registerChannelsModule(
       const result = service.leave(
         agentId === undefined ? { channelId } : { channelId, agentId },
         auth,
+        ctx.workspaceId,
       );
       ctx.logger.info({
         channelId: result.channelId,
@@ -882,7 +891,7 @@ export function registerChannelsModule(
       const body = readRequiredString(input, 'body', MAX_MESSAGE_BODY_LENGTH, {
         trim: false,
       });
-      const result = service.send({ channelId, body }, auth);
+      const result = service.send({ channelId, body }, auth, ctx.workspaceId);
       ctx.logger.info({
         channelId,
         messageId: result.message.messageId,

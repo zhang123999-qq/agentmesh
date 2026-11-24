@@ -67,6 +67,15 @@ docs                本目录
 | `snapshots` | `(aggregate_id, version)` | 聚合快照（v2） |
 | `schema_version` | 迁移台账 | 幂等迁移 |
 
+## 租户作用域（US-023）
+
+- 每个已验证请求的 `workspaceId` **只来自 token claim**：dispatcher 用 `auth.workspaceId`
+  固定作用域，token 覆盖任何 `X-Workspace-Id` 请求头（无法靠改头扩权）。
+- 所有 RPC 把该 `workspaceId` 传给服务层（`ctx.workspaceId`），store 查询按此过滤；跨租户读/资源
+  返回 **-32004**（不泄露存在性），跨租户动作/撤销返回 **-32002**。
+- `agent.register` 无 token → 写 `default`；多 workspace 注册/租户创建归 US-025。presence 仍全局共用
+  直到 US-024 分片。
+
 ## 传输与模块
 
 - `POST /rpc`：JSON-RPC over HTTP，notification 返回 204。

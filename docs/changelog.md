@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-023 多租户 RPC + 鉴权
+
+测试基线：**580**（server 287 → 292；其余不变）。
+
+- **作用域**：所有 RPC 从 token 推断 workspace（dispatcher 以 `auth.workspaceId` 固定，覆盖请求头）。
+  `channel.create/join/leave/send` 之前用服务默认 workspace（跨租户写入面），已补线程 `ctx.workspaceId`。
+- **错误码**：跨租户读/资源 `-32004`（防探测），动作/撤销 `-32002`；`agent.revokeToken` 校验目标 token
+  与调用者同 workspace，跨租户 `-32002`。
+- `agent.register` 仍写 `default`（多 workspace 注册延后 US-025）；`presence` 仍全局共用（US-024 分片）。
+- 测试（+5，server 287→292）：跨租户 `task.get`/`message.history`/`channel.join` → -32004；`channel.list`
+  跨租户为空；ws-b admin `channel.create` 落 ws-b（default 不可见）；跨租户 revoke -32002 / 同租户可撤；
+  `system.subscribe` 非 admin -32002；default 注册/使用向后兼容。
+- **故障注入自检**：dispatcher 改为忽略 token workspace → 3 条隔离测试变红，恢复后全绿。
+- 回归：`npm run verify` 全绿；CI（verify / web-e2e / docker）随提交复跑。
+
 ## 2026-11-23 — US-022 多租户 schema 迁移（v9）
 
 测试基线：**575**（store 71 → 74；其余不变）。schema 版本 **v8 → v9**。

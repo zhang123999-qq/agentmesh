@@ -46,6 +46,13 @@ export function registerRevocationModule(
       // Verify the target token to recover its jti/exp (a revoked or expired
       // token throws -32001 here, which is the correct observable behaviour).
       const verified = await options.tokens.verify(parsed.data.targetToken);
+      // US-023: an admin may only revoke tokens of their own workspace.
+      if (verified.workspaceId !== ctx.workspaceId) {
+        throw new ProtocolError(
+          JsonRpcErrorCode.Forbidden,
+          'cannot revoke a token from another workspace',
+        );
+      }
       const jti = verified.tokenId;
       const expiresAt = verified.expiresAt;
       if (jti === undefined || expiresAt === undefined) {

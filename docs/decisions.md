@@ -653,3 +653,27 @@ lockfile）；CI e2e job 用 `npm ci` 后 `npm install --no-save @playwright/tes
 **测试（store 71→74）**：v9 建 `workspaces` 并 seed `default`；`channel_members` PK 允许两 workspace
 共享 `(channel, agent)`；v8→v9 保留 legacy 行且默认 `'default'`、二次运行 applied=[]。
 `verify-local.mjs` / `cli-maintenance` / `migrations` 的 schema 版本断言 8→9 全部同步。
+
+## US-023 多租户 RPC + 鉴权（4 个决策）
+
+> 前置：US-022 v9 schema 已就绪；US-021E 23 RPC 归属表已锁死。本故事不做 presence（US-024）。
+
+1. **参数注入**：**一律从 token 推断 workspace**（`ctx.workspaceId`；dispatcher 用
+   `auth?.workspaceId` 固定，token claim 覆盖任何 `X-Workspace-Id` 头），**不新增 workspaceId 请求参数**。
+   落地：`channel.create/join/leave/send` 之前用服务默认 workspace（泄漏点），已补线程 `ctx.workspaceId`；
+   `task.*` / `account.list/authenticate` / `system.subscribe` 本就用 `ctx.workspaceId`。
+2. **越权错误码**：读/资源类 **-32004**（避免探测存在性），动作/角色类 **-32002**。跨租户 `task.get` /
+   `message.history` / `channel.join` → -32004；跨租户撤销 `agent.revokeToken` → -32002；全方法一致。
+3. **JWT workspaceId 来源**：`agent.register` 无 token → 写 **default**（多 workspace 注册延后，需 admin RPC
+   或 seed；本故事**不加新 RPC**，保持 23/23）；`agent.authenticate` 取账号所属 workspace；其余取 token claim。
+   管理员创建其他 workspace 的 agent 的入口列为 US-025（运维）或 seed。
+4. **presence 过渡期**：US-024 前 presence 仍**全局共用**（不按 workspace 过滤）——明确记为已知过渡态，
+   不是 bug；US-024 再按 workspace 分片 + 广播过滤。
+
+**实现**：`channels` 4 方法线程 `ctx.workspaceId`（含 `#view(...workspaceId)`）；`revokeToken` 校验目标
+token 的 workspace == 调用者，跨租户 -32002；dispatcher 的 token-pin 保持不变（已是正确行为）。
+
+**测试（+5，server 287→292，共 580）**：跨租户 `task.get`/`message.history`/`channel.join` → -32004；
+`channel.list` 跨租户为空；ws-b admin `channel.create` 落在 ws-b（default 看不到）；跨租户 revoke → -32002、
+同租户可撤销；`system.subscribe` 非 admin → -32002；default 注册/使用向后兼容。
+**故障注入自检**：dispatcher 改为忽略 token workspace → 3 条隔离测试变红，恢复后全绿。
