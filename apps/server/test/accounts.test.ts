@@ -776,6 +776,10 @@ describe('HTTP transport wiring', () => {
       METHODS.task.publish,
       METHODS.task.reassign,
       METHODS.task.review,
+      // US-025 workspace lifecycle (registers with a store-wired server).
+      METHODS.workspace.create,
+      METHODS.workspace.disable,
+      METHODS.workspace.list,
     ]);
     expect(app.accounts).toBeInstanceOf(AccountsService);
     expect(app.store?.db).toBe(db);

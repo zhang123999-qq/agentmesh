@@ -45,6 +45,11 @@ export const METHODS = {
   system: {
     subscribe: 'system.subscribe',
   },
+  workspace: {
+    create: 'workspace.create',
+    list: 'workspace.list',
+    disable: 'workspace.disable',
+  },
 } as const;
 
 export type MethodGroups = typeof METHODS;
@@ -73,6 +78,9 @@ export const METHOD_NAMES = [
   METHODS.task.reassign,
   METHODS.task.cancel,
   METHODS.system.subscribe,
+  METHODS.workspace.create,
+  METHODS.workspace.list,
+  METHODS.workspace.disable,
 ] as const;
 
 export type MethodName = (typeof METHOD_NAMES)[number];

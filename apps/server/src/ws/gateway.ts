@@ -133,6 +133,11 @@ export interface WsGatewayOptions {
   readonly events: EventsDao;
   readonly logger: Logger;
   /**
+   * US-025: return true when a workspace is disabled, so a disabled tenant's
+   * tokens can no longer open a session. Absent ⇒ no workspace is disabled.
+   */
+  readonly workspaceDisabled?: (workspaceId: string) => boolean;
+  /**
    * Epoch of this `seq` space. Defaults to a fresh `randomUUID()` per
    * instance, which is exactly the "restart ⇒ new epoch" behaviour clients
    * need to detect a cold start.
@@ -211,9 +216,11 @@ export class WsGateway {
 
   #heartbeatTimer?: NodeJS.Timeout;
   #closed = false;
+  readonly #workspaceDisabled?: (workspaceId: string) => boolean;
 
   constructor(options: WsGatewayOptions) {
     this.epoch = options.epoch ?? randomUUID();
+    this.#workspaceDisabled = options.workspaceDisabled;
     this.#dispatcher = options.dispatcher;
     this.#tokens = options.tokens;
     this.#events = options.events;
@@ -401,6 +408,13 @@ export class WsGateway {
   async #authenticateWithToken(session: WsSession, token: string): Promise<void> {
     try {
       const auth = await this.#tokens.verify(token);
+      // US-025: a disabled workspace can no longer open a session.
+      if (
+        auth.workspaceId !== undefined &&
+        this.#workspaceDisabled?.(auth.workspaceId) === true
+      ) {
+        throw new Error('workspace_disabled');
+      }
       this.#bindSession(session, auth);
     } catch (err) {
       const reason =

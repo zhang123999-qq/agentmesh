@@ -251,7 +251,10 @@ describe('task.publish', () => {
 
     const workerError = errorOf(await publish(h, worker.token));
     expect(workerError.code).toBe(JsonRpcErrorCode.Forbidden);
-    expect(workerError.data).toMatchObject({ role: 'agent', required: ['admin'] });
+    expect(workerError.data).toMatchObject({
+      role: 'agent',
+      required: ['admin', 'workspace_admin'],
+    });
 
     const observerError = errorOf(await publish(h, watcher.token));
     expect(observerError.code).toBe(JsonRpcErrorCode.Forbidden);

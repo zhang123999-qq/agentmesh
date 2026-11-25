@@ -2,6 +2,27 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — US-025 租户创建 / 跨租户登记 / 运维（v10）
+
+测试基线：**590**（store 74→76，server 293→300）。schema **v9 → v10**。RPC **23/23 → 26/26**。
+
+- 新 RPC：`workspace.create` / `workspace.list` / `workspace.disable`（**平台 admin 专属**）；
+  协议新增 `workspace*Params/Result`、错误码 **-32008（QuotaExceeded）**、角色 **`workspace_admin`**
+  （`METHOD_NAMES` 23→26，constants 测试同步）。
+- 邀请码登记：`workspace.create` 返回 `inviteCode`（随机、可过期）；`agent.register { inviteCode }`
+  落到目标租户，无 invite 落 default；无效/过期 -32004；配额 -32008。
+- 角色矩阵：`workspace_admin`（`WORKSPACE_ADMIN_ROLES=['admin','workspace_admin']`）仅本租户管理；
+  平台 `workspace.*` 仅 `admin`（`ADMIN_ROLES`）。task/channel/system/revokeToken 门禁接受 workspace_admin。
+- v10 迁移：`workspaces` 扩 `invite_code/invite_expires_at/disabled_at/max_agents` + 唯一部分索引；
+  `AccountsDao.getAnyWorkspace` 全局回退（租户成员可凭 id/secret 匿名 authenticate）；`WorkspacesDao` 扩展。
+- 禁用：`disabled_at` 非空 → 网关 handshake 与 `agent.authenticate` 拒绝（-32002），不主动踢 socket；default 不可禁用。
+- SDK 公开 API 扩展（**点名**）：`createWorkspace/listWorkspaces/disableWorkspace`；CLI 新增
+  `agentmesh workspace create|list|disable`。
+- 测试（+7，server 293→300）：create/list；invite 落目标租户 / 无 invite 落 default；无效/过期 invite -32004；
+  配额 -32008；禁用拒新 auth/invite -32002；workspace_admin 可发任务但不能建租户；匿名/agent 负向。
+  故障注入：关闭配额校验 → 配额测试红，恢复绿。
+- 回归：verify + CI（verify/web-e2e/docker）随提交复跑。
+
 ## 2026-11-23 — US-024 presence 按 workspace 分片
 
 测试基线：**581**（server 292 → 293；其余不变）。

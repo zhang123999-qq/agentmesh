@@ -89,7 +89,7 @@ docs                本目录
   - Origin allow-list（CSWSH 防护）与 1 MiB `maxPayload`。
 - 业务模块：账号（US-005）、频道/消息与历史（US-007/010）、任务/竞标/授标/执行/
   审核/改派/取消（US-008/009/011/013）。
-- 已注册 **23 / 23** 个协议方法（含 US-020 `system.subscribe`、US-021D `agent.revokeToken`）。
+- 已注册 **26 / 26** 个协议方法（含 `system.subscribe`、`agent.revokeToken`、`workspace.create/list/disable`）。
 - 生命周期：`open → bidding → awarded → in_progress → review → done`；
   `review` 可 approve→done / reject|request-revision→in_progress；
   `awarded/in_progress/review` 可 reassign→in_progress；
@@ -177,3 +177,13 @@ docs                本目录
 ```bash
 npm run build && npm test
 ```
+
+## 租户生命周期（US-025）
+
+- **创建**：`workspace.create`（平台 admin）→ 写 `workspaces`（含 `invite_code`/`invite_expires_at`/
+  `max_agents`）+ 返回邀请码；`workspace.list`/`workspace.disable` 同为平台 admin。
+- **加入**：`agent.register { inviteCode }` → 由邀请码解析租户，在目标 workspace 建账号并签发该租户的
+  token；无邀请码落 `default`。配额（maxAgents）与禁用在工作区层面校验。
+- **角色**：`workspace_admin` 是租户内管理员（不跨租户）；平台操作仍 `admin`。鉴权用
+  `WORKSPACE_ADMIN_ROLES`（工作区管理门禁）与 `ADMIN_ROLES`（平台门禁）区分。
+- **禁用**：`disabled_at` 非空后，网关 handshake 与 `agent.authenticate` 均拒绝该租户；不主动断开既有 socket。

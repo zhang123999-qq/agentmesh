@@ -21,6 +21,10 @@ import {
   type TaskProgressParams,
   type TaskReassignParams,
   type TaskReviewParams,
+  type WorkspaceCreateParams,
+  type WorkspaceCreateResult,
+  type WorkspaceDisableParams,
+  type WorkspaceDisableResult,
 } from '@agentmesh/protocol';
 import type { SystemSubscribeParams } from './types.js';
 
@@ -404,6 +408,21 @@ export class AgentMeshClient {
    */
   revokeToken(params: AgentRevokeTokenParams): Promise<AgentRevokeTokenResult> {
     return this.#request(METHODS.agent.revokeToken, params);
+  }
+
+  /** Create a tenant + invite code (platform admin only, US-025). */
+  createWorkspace(params: WorkspaceCreateParams): Promise<WorkspaceCreateResult> {
+    return this.#request(METHODS.workspace.create, params);
+  }
+
+  /** List tenants (platform admin only, US-025). */
+  listWorkspaces(): Promise<{ workspaces: WorkspaceCreateResult['workspace'][] }> {
+    return this.#request(METHODS.workspace.list, {});
+  }
+
+  /** Disable a tenant — blocks new auth (platform admin only, US-025). */
+  disableWorkspace(params: WorkspaceDisableParams): Promise<WorkspaceDisableResult> {
+    return this.#request(METHODS.workspace.disable, params);
   }
 
   createChannel(params: CreateChannelParams): Promise<{ channel: ChannelView; seq: number }> {

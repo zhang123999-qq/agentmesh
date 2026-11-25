@@ -127,3 +127,37 @@ export const agentRevokeTokenResultSchema = z.object({
   expiresAt: z.number().int().nonnegative(),
 });
 export type AgentRevokeTokenResult = z.infer<typeof agentRevokeTokenResultSchema>;
+
+/**
+ * Workspace lifecycle params (US-025, system-admin only).
+ */
+export const workspaceCreateParamsSchema = z.object({
+  name: z.string().min(1).max(120),
+  /** Optional per-tenant agent quota; defaults applied by the server. */
+  maxAgents: z.number().int().positive().optional(),
+});
+export type WorkspaceCreateParams = z.infer<typeof workspaceCreateParamsSchema>;
+
+export const workspaceDisableParamsSchema = z.object({
+  workspaceId: z.string().min(1),
+});
+export type WorkspaceDisableParams = z.infer<typeof workspaceDisableParamsSchema>;
+
+export const workspaceCreateResultSchema = z.object({
+  workspace: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    createdAt: z.number().int().nonnegative(),
+    maxAgents: z.number().int().positive(),
+    disabledAt: z.number().int().nonnegative().nullable(),
+  }),
+  inviteCode: z.string().min(1),
+  inviteExpiresAt: z.number().int().nonnegative(),
+});
+export type WorkspaceCreateResult = z.infer<typeof workspaceCreateResultSchema>;
+
+export const workspaceDisableResultSchema = z.object({
+  disabled: z.literal(true),
+  workspaceId: z.string().min(1),
+});
+export type WorkspaceDisableResult = z.infer<typeof workspaceDisableResultSchema>;

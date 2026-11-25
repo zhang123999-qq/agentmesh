@@ -51,6 +51,7 @@ import {
 import { registerSystemModule } from './modules/system.js';
 import { HashChainMonitor } from './modules/hash-chain.js';
 import { registerRevocationModule } from './modules/revocation.js';
+import { registerWorkspaceModule } from './modules/workspace.js';
 import { TokenRevocationRegistry } from './auth/revocation.js';
 import { createHandlerRegistry, type HandlerRegistry } from './registry.js';
 import { WsGateway, type WsGatewayOptions } from './ws/gateway.js';
@@ -109,6 +110,11 @@ export interface BuildServerOptions {
    * wired. Turn off when the caller installs its own revocation stub.
    */
   readonly registerRevocation?: boolean;
+  /**
+   * Register `workspace.*` lifecycle RPCs (US-025). Default: on whenever a store
+   * is wired.
+   */
+  readonly registerWorkspace?: boolean;
   /** Task-module overrides (TTL / id factory / clock) — mostly for tests. */
   readonly tasks?: Omit<
     TasksModuleOptions,
@@ -243,6 +249,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           tokens,
           workspaceId: 'default',
           allowAdminSelfRegister: config.allowAdminSelfRegister,
+          workspaces: store.repos.workspaces,
           authRateLimit: {
             maxFailedAttempts: config.authMaxFailedAttempts,
             failWindowSeconds: config.authFailWindowSeconds,
@@ -251,6 +258,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           ...options.accounts,
         }),
       );
+    }
+    if (options.registerWorkspace !== false) {
+      registerWorkspaceModule(registry, { workspaces: store.repos.workspaces, logger });
     }
   }
 
@@ -264,6 +274,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       events: store.repos.events,
       logger,
       workspaceId: 'default',
+      workspaceDisabled: (wsId: string) => {
+        if (wsId === 'default') return false;
+        const ws = store.repos.workspaces.get(wsId);
+        return ws !== undefined && ws.disabledAt !== null;
+      },
       heartbeatIntervalMs: config.wsHeartbeatIntervalMs,
       resumeMaxEvents: config.resumeMaxEvents,
       allowedOrigins: config.allowedOrigins,

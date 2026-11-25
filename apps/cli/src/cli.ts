@@ -30,6 +30,11 @@ import {
 import { collectDoctorChecks, formatDoctor } from './commands/doctor.js';
 import { runMessageHistory, runMessageSend } from './commands/message.js';
 import {
+  runWorkspaceCreate,
+  runWorkspaceDisable,
+  runWorkspaceList,
+} from './commands/workspace.js';
+import {
   runTaskAward,
   runTaskBid,
   runTaskBids,
@@ -327,6 +332,22 @@ export async function run(argv: readonly string[], options: RunOptions = {}): Pr
             throw new UsageError(
               'usage: agentmesh task publish|list|get|bid|bids|award|progress|' +
                 'complete|fail|review|reassign|cancel|watch [options]',
+            );
+        }
+      case 'workspace':
+        switch (action) {
+          case 'create':
+            await withClient(false, runWorkspaceCreate);
+            return 0;
+          case 'list':
+            await withClient(false, runWorkspaceList);
+            return 0;
+          case 'disable':
+            await withClient(false, runWorkspaceDisable);
+            return 0;
+          default:
+            throw new UsageError(
+              'usage: agentmesh workspace create|list|disable [options]',
             );
         }
       default:

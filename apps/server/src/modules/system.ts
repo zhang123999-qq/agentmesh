@@ -11,7 +11,7 @@
 
 import { METHODS } from '@agentmesh/protocol';
 import type { HandlerRegistry } from '../registry.js';
-import { requireRole } from '../auth/roles.js';
+import { WORKSPACE_ADMIN_ROLES, requireRole } from '../auth/roles.js';
 import type { WsGateway } from '../ws/gateway.js';
 import type { WsSession } from '../ws/session.js';
 
@@ -47,7 +47,7 @@ export function registerSystemModule(
   registry.registerHandler(
     METHODS.system.subscribe,
     async (ctx, params) => {
-      requireRole(ctx, ['admin']);
+      requireRole(ctx, WORKSPACE_ADMIN_ROLES);
 
       const input = params as Record<string, unknown>;
       const includeDomainEvents = input.includeDomainEvents === true;

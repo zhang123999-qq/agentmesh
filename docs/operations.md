@@ -177,3 +177,15 @@ curl -kf https://localhost:8443/health
 - 迁移在单事务内执行，失败自动回滚到迁移前；`channel_members` 重建（建新表→拷→DROP→RENAME）在同一
   事务内，不会留下半重建状态。
 - 回滚演练：备份 → 启动旧版本（或对备份执行 `migrate` 到目标版本）→ 校验 health。
+
+## 租户运维（US-025）
+
+- 创建租户（平台 admin）：`agentmesh workspace create --name "Acme" --max-agents 50`
+  （或 RPC `workspace.create`）→ 返回 `inviteCode`。
+- 邀请 agent：持有邀请码者执行 `agent.register --name <n> --invite-code <code>`
+  （或 RPC `agent.register { name, inviteCode }`）；生成的 token 绑定该租户。
+  邀请码可过期（默认 7 天，`invite_expires_at`）；过期/无效 → `-32004`。
+- 列表：`agentmesh workspace list`；禁用：`agentmesh workspace disable --workspace <id>`
+  （`default` 不可禁用）。禁用后该租户新登录/注册被拒（`-32002`），既有 socket 不主动断开。
+- 配额：`max_agents`（默认 100），超限 `-32008`。
+- v10 迁移前向不可逆，升级前备份（见「数据库迁移」）。

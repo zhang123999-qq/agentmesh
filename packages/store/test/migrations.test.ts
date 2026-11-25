@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CURRENT_SCHEMA_VERSION,
   MIGRATIONS,
+  createRepositories,
   getSchemaVersion,
   listAppliedMigrations,
   openDatabase,
@@ -45,8 +46,9 @@ describe('migrations', () => {
       'task_progress_and_side_effect_events',
       'task_completed_at',
       'multi_tenant_schema',
+      'workspace_lifecycle',
     ]);
-    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
   it('is idempotent: a second run applies nothing and does not throw', () => {
@@ -54,7 +56,7 @@ describe('migrations', () => {
     const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(listAppliedMigrations(db)).toHaveLength(9);
+    expect(listAppliedMigrations(db)).toHaveLength(10);
 
     // Third run on the same handle: still fine.
     expect(() => runMigrations(db)).not.toThrow();
@@ -66,7 +68,7 @@ describe('migrations', () => {
     db.exec('DELETE FROM schema_version');
     expect(getSchemaVersion(db)).toBe(0);
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
   });
 
@@ -109,9 +111,9 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8, 9], version: 9 });
-    expect(getSchemaVersion(db)).toBe(9);
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8, 9, 10], version: 10 });
+    expect(getSchemaVersion(db)).toBe(10);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
     // messages is untouched by v3-v9, so its table definition is byte-identical.
     const schemaAfter = db
@@ -282,7 +284,7 @@ describe('migrations', () => {
     expect(columnsOf(db, 'accounts').filter((c) => c.name === 'secret_hash')).toHaveLength(1);
 
     // A manual body re-run must not corrupt the ledger.
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(runMigrations(db).applied).toEqual([]);
   });
 
@@ -315,8 +317,8 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [4, 5, 6, 7, 8, 9], version: 9 });
-    expect(getSchemaVersion(db)).toBe(9);
+    expect(result).toEqual({ applied: [4, 5, 6, 7, 8, 9, 10], version: 10 });
+    expect(getSchemaVersion(db)).toBe(10);
     expect(columnsOf(db, 'accounts').map((c) => c.name)).toContain('secret_hash');
 
     const row = db
@@ -388,7 +390,7 @@ describe('v9 multi-tenant schema (US-022)', () => {
     ).run();
 
     const result = runMigrations(db);
-    expect(result).toEqual({ applied: [9], version: 9 });
+    expect(result).toEqual({ applied: [9, 10], version: 10 });
 
     const row = db
       .prepare('SELECT workspace_id, joined_at FROM channel_members WHERE channel_id = ?')
@@ -396,5 +398,38 @@ describe('v9 multi-tenant schema (US-022)', () => {
     expect(row).toEqual({ workspace_id: 'default', joined_at: 7 });
     // Idempotent: re-running does not re-apply v9 or rebuild again.
     expect(runMigrations(db).applied).toEqual([]);
+  });
+});
+
+describe('v10 workspace lifecycle (US-025)', () => {
+  it('adds invite/disable/quota columns with max_agents defaulting to 100', () => {
+    const { db } = makeStore();
+    const cols = columnsOf(db, 'workspaces').map((c) => c.name);
+    expect(cols).toEqual(
+      expect.arrayContaining(['invite_code', 'invite_expires_at', 'disabled_at', 'max_agents']),
+    );
+    const def = db
+      .prepare("SELECT max_agents FROM workspaces WHERE id = 'default'")
+      .get() as { max_agents: number };
+    expect(def.max_agents).toBe(100);
+    expect(indexNames(db, 'workspaces')).toContain('uq_workspaces_invite_code');
+  });
+
+  it('WorkspacesDao: create-with-invite, findByInvite, disable (default protected)', () => {
+    const { db } = makeStore();
+    const repos = createRepositories(db);
+    const created = repos.workspaces.create({
+      id: 'ws-x',
+      name: 'X',
+      inviteCode: 'inv-1',
+      inviteExpiresAt: Date.now() + 60_000,
+      maxAgents: 5,
+    });
+    expect(created.maxAgents).toBe(5);
+    expect(repos.workspaces.findByInvite('inv-1')?.id).toBe('ws-x');
+    expect(repos.workspaces.disable('ws-x')).toBe(true);
+    expect(repos.workspaces.get('ws-x')?.disabledAt).not.toBeNull();
+    // `default` cannot be disabled.
+    expect(repos.workspaces.disable('default')).toBe(false);
   });
 });

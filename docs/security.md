@@ -24,7 +24,7 @@
 - **撤销（US-021D）**：`agent.revokeToken`（admin-only）按 `jti` 撤销单个 token，撤销后在
   `exp` 前校验即失败（`-32001`，不泄露"已撤销"语义）。存储为**进程内存 LRU**（上限 1 万，
   过期懒清理）；**重启后撤销不保留**（token 在 `exp` 前复活）——整集且持久失效靠轮换
-  `JWT_SECRET`（需维护窗口）。撤销入口为 RPC（23/23），无 CLI。
+  `JWT_SECRET`（需维护窗口）。撤销入口为 RPC，无 CLI。
   **已决策边界（US-021D follow-up，2026-11-23）**：保持进程内为有意识的选择，非遗漏；
   怀疑泄露请直接轮换 secret。复审条件（多实例 / 合规 / 多租户落地）见 decisions.md。
 - **未来 RS256**：仅当第三方需独立验签或需要零停机轮换时迁移；步骤为生成密钥对、
@@ -110,3 +110,14 @@
   分片；online/offline 广播按 workspace 过滤，跨租户 socket 收不到彼此的存在事件。
 - **已知过渡态**：`agent.register` 仍仅写 `default`，租户创建/跨租户登记归 US-025。`seq` 仍全局唯一
   （按 workspace 过滤读取）。
+
+## 租户生命周期与角色矩阵（US-025）
+
+- 角色：`admin`（平台，唯一可 `workspace.create/list/disable`）、`workspace_admin`（**仅本 workspace**
+  管理权）、`agent`、`observer`。
+- 创建：`workspace.create`（平台 admin）返回一次性 `inviteCode`（随机、可过期，v10 存储）。
+  `agent.register` 带 `inviteCode` 落到目标租户；无 invite 落 `default`。邀请码是 provision 信任锚：
+  可创建 `agent` 或 `workspace_admin`，**不能**创建平台 `admin`。
+- 禁用：`workspace.disable` 阻止**新**登录/注册（-32002），不主动踢已建立 socket；`default` 不可禁用。
+- 配额：`maxAgents`（v10 列，默认 100），邀请 redeem 超限返回 **-32008**。
+- 越权：`workspace_admin` 只能操作本租户；平台操作仅 `admin`（跨租户 workspace.* → -32002）。

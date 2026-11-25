@@ -16,7 +16,7 @@ import {
 import type { Logger } from 'pino';
 
 import type { TokenRevocationRegistry } from '../auth/revocation.js';
-import { requireRole } from '../auth/roles.js';
+import { WORKSPACE_ADMIN_ROLES, requireRole } from '../auth/roles.js';
 import type { TokenService } from '../auth/token.js';
 import type { HandlerRegistry } from '../registry.js';
 
@@ -33,7 +33,7 @@ export function registerRevocationModule(
   registry.registerHandler(
     METHODS.agent.revokeToken,
     async (ctx, params) => {
-      requireRole(ctx, ['admin']);
+      requireRole(ctx, WORKSPACE_ADMIN_ROLES);
       const parsed = agentRevokeTokenParamsSchema.safeParse(params);
       if (!parsed.success) {
         throw new ProtocolError(

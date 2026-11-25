@@ -413,6 +413,29 @@ export const MIGRATIONS: readonly Migration[] = [
       }
     },
   },
+  {
+    version: 10,
+    name: 'workspace_lifecycle',
+    up: (db) => {
+      // US-025: invite-code onboarding, disable, and per-tenant agent quota.
+      const columns: ReadonlyArray<readonly [string, string]> = [
+        ['invite_code', 'ALTER TABLE workspaces ADD COLUMN invite_code TEXT'],
+        ['invite_expires_at', 'ALTER TABLE workspaces ADD COLUMN invite_expires_at INTEGER'],
+        ['disabled_at', 'ALTER TABLE workspaces ADD COLUMN disabled_at INTEGER'],
+        [
+          'max_agents',
+          'ALTER TABLE workspaces ADD COLUMN max_agents INTEGER NOT NULL DEFAULT 100',
+        ],
+      ];
+      for (const [column, ddl] of columns) {
+        if (!hasColumn(db, 'workspaces', column)) db.exec(ddl);
+      }
+      db.exec(
+        `CREATE UNIQUE INDEX IF NOT EXISTS uq_workspaces_invite_code
+           ON workspaces(invite_code) WHERE invite_code IS NOT NULL;`,
+      );
+    },
+  },
 ];
 
 /** Highest migration version shipped by this build. */

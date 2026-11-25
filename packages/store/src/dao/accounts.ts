@@ -109,6 +109,18 @@ export class AccountsDao {
   }
 
   /**
+   * Look up an account by id regardless of workspace. Ids are globally unique
+   * (PK), so a tenant member can authenticate by id without knowing its
+   * workspace (US-025 invite onboarding).
+   */
+  getAnyWorkspace(id: string): Account | undefined {
+    const row = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
+      | AccountRow
+      | undefined;
+    return row ? mapAccount(row) : undefined;
+  }
+
+  /**
    * Stored credential digest for an account (`null` when none was issued,
    * e.g. pre-v4 rows). The plaintext secret is never persisted.
    */

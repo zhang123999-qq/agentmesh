@@ -244,7 +244,7 @@ export type SystemErrorPayload = z.infer<typeof systemErrorPayloadSchema>;
 // ---------------------------------------------------------------------------
 
 /** Account roles; the single source of truth for `role` everywhere. */
-export const ACCOUNT_ROLES = ['admin', 'agent', 'observer'] as const;
+export const ACCOUNT_ROLES = ['admin', 'workspace_admin', 'agent', 'observer'] as const;
 export const accountRoleSchema = z.enum(ACCOUNT_ROLES);
 export type AccountRole = z.infer<typeof accountRoleSchema>;
 

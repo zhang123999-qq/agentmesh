@@ -25,7 +25,7 @@ import { JsonRpcErrorCode, ProtocolError } from '@agentmesh/protocol';
 import type { AccountRole } from '@agentmesh/protocol';
 
 /** Canonical role names (aliased from the protocol contract). */
-export const ROLES = ['admin', 'agent', 'observer'] as const;
+export const ROLES = ['admin', 'workspace_admin', 'agent', 'observer'] as const;
 
 /** Alias kept for readability in the server's own code. */
 export type Role = AccountRole;
@@ -59,8 +59,14 @@ export interface AuthCarrier {
 }
 
 /** Roles allowed to list accounts (read-only roster). */
-export const ACCOUNT_LIST_ROLES: readonly Role[] = ['admin', 'agent'];
-/** Roles allowed to mutate other accounts / administrative state. */
+export const ACCOUNT_LIST_ROLES: readonly Role[] = ['admin', 'workspace_admin', 'agent'];
+/**
+ * Roles allowed to mutate other accounts / administrative state **within their
+ * own workspace** (US-025). `workspace_admin` is an admin scoped to one tenant;
+ * platform-wide operations (workspace.create/list/disable) stay `admin` only.
+ */
+export const WORKSPACE_ADMIN_ROLES: readonly Role[] = ['admin', 'workspace_admin'];
+/** Platform-wide admin only (cross-tenant operations). */
 export const ADMIN_ROLES: readonly Role[] = ['admin'];
 
 /** True when the request carries a verified identity. */

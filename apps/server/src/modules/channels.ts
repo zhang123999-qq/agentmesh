@@ -76,7 +76,7 @@ import type {
 import { withTransaction } from '@agentmesh/store';
 
 import type { AuthContext } from '../auth/roles.js';
-import { ADMIN_ROLES, requireRole } from '../auth/roles.js';
+import { WORKSPACE_ADMIN_ROLES, requireRole } from '../auth/roles.js';
 import type { HandlerRegistry } from '../registry.js';
 
 /** Longest accepted channel name. */
@@ -477,7 +477,7 @@ export class ChannelsService {
     const channel = this.#requireChannel(input.channelId, workspaceId);
     const agentId = input.agentId ?? actor.agentId;
     if (agentId !== actor.agentId) {
-      requireRole({ auth: actor }, ADMIN_ROLES);
+      requireRole({ auth: actor }, WORKSPACE_ADMIN_ROLES);
     }
 
     const existing = this.#members.get(channel.id, agentId, channel.workspaceId);
@@ -534,7 +534,7 @@ export class ChannelsService {
     const channel = this.#requireChannel(input.channelId, workspaceId);
     const agentId = input.agentId ?? actor.agentId;
     if (agentId !== actor.agentId) {
-      requireRole({ auth: actor }, ADMIN_ROLES);
+      requireRole({ auth: actor }, WORKSPACE_ADMIN_ROLES);
     }
 
     const existing = this.#members.get(channel.id, agentId, channel.workspaceId);

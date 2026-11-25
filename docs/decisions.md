@@ -702,3 +702,39 @@ token 的 workspace == 调用者，跨租户 -32002；dispatcher 的 token-pin �
 **测试（+1，server 292→293，共 581）**：两个 observer（default / ws-b）各一 socket；ws-b agent 上线只
 被 ws-b observer 收到、default 不收到；default agent 上线只被 default 收到；`onlineAgents('ws-b')` 含
 agt_b1、`onlineAgents('default')` 不含；offline 仅本 workspace。故障注入：去掉过滤→该测试红，恢复绿。
+
+## US-025 租户创建 / 跨租户登记 / 运维（7 个决策）
+
+1. **租户创建入口**：**新增 RPC `workspace.create`（平台 admin）+ CLI 薄封装**
+   （`agentmesh workspace create|list|disable`）。RPC 计数 **23/23 → 26/26**（create/list/disable），
+   全仓同步。被否决：仅 CLI（远程运维缺失）；仅 seed（不可持续）。
+2. **跨租户登记**：**邀请码**。`workspace.create` 返回 `inviteCode`（随机、可过期，v10 存
+   `invite_code` + `invite_expires_at`）；`agent.register` 增加可选 `inviteCode` 参数完成 redeem
+   （不单独开 invite/redeem RPC）。无 invite → 仍写 default（向后兼容）。被否决：admin 直接建 agent；
+   register 传 workspaceId（暴露租户标识）。
+3. **角色矩阵**：**新增 `workspace_admin`**。
+   - `admin`（平台）：`workspace.create/list/disable` 仅它可用；也具备全部工作区权限。
+   - `workspace_admin`：**仅在本 workspace** 具备管理权（task publish/award/review/reassign/cancel/fail、
+     channel 管理他人、account.list、system.subscribe、agent.revokeToken），**不能**创建/禁用租户。
+   - `agent`：业务操作；`observer`：只读。
+   实现：`WORKSPACE_ADMIN_ROLES=['admin','workspace_admin']` 用于工作区管理门禁；
+   `ADMIN_ROLES=['admin']` 仅平台操作。`workspace_admin` 账户只能经**邀请码**创建（邀请即信任锚），
+   不能匿名注册。
+4. **运维能力**：`workspace.list` / `workspace.disable`（**default 不可禁用**）。配额 `maxAgents`
+   （v10 列，默认 100），邀请 redeem 时超限返回 **新增错误码 -32008（QuotaExceeded）**。
+   **禁用只阻止新登录/注册**，不主动踢已建立 socket（与 US-021D 边界一致，文档写明）。
+5. **与 US-021D**：禁用**不等价于**批量撤销；撤销仍进程内（US-021D follow-up）。若未来做 v11 持久化撤销，
+   需与工作区隔离一起评估。
+6. **register 兼容**：无 invite → default（US-023 决策 3 不变）；有 invite → 目标租户；重复 name 仍全局
+   唯一（沿现有 getByNameAnyWorkspace 语义）。租户成员可凭 id/secret 匿名 authenticate（新增
+   `AccountsDao.getAnyWorkspace` 全局回退，因 agentId 全局唯一）。
+7. **迁移**：**v10** 扩 `workspaces`（invite_code / invite_expires_at / disabled_at / max_agents）+ 唯一
+   部分索引；前向不可逆。撤销持久化改用 **v11**（顺序：v10=US-025，v11=撤销）。迁移前备份依赖备份制度化。
+
+**实现/测试**：新模块 `modules/workspace.ts`（create/list/disable，平台 admin）；accounts 支持 invite/配额/
+禁用；gateway handshake 增加 `workspaceDisabled` 守卫（禁用租户 token 不能再开 socket）；
+`AccountsDao.getAnyWorkspace`。协议新增 3 方法 + `-32008` + `workspace_admin` 角色；SDK 新增
+`createWorkspace/listWorkspaces/disableWorkspace`（**公开 API 扩展，点名**）。测试 +7（server 293→300，共
+590）：create/list；invite redeem 落目标租户、无 invite 落 default；无效/过期 invite -32004；配额 -32008；
+禁用拒新 auth 与 invite redeem -32002；workspace_admin 可发任务但不能建租户；匿名/agent 负向。
+故障注入：关闭配额校验 → 配额测试红，恢复绿。

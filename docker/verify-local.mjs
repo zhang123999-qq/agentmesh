@@ -50,7 +50,7 @@ const migrateTwice = (path) => {
   const second = runNode(['apps/server/dist/cli/migrate.js', '--db', path]);
   if (second.status !== 0) throw new Error(`migrate failed: ${second.stderr}`);
   const secondJson = JSON.parse(second.stdout.trim());
-  return secondJson.applied.length === 0 &&  secondJson.version === 9;
+  return secondJson.applied.length === 0 &&  secondJson.version === 10;
 };
 
 let child;
@@ -60,7 +60,7 @@ try {
   const freshSecond = runNode(['apps/server/dist/cli/migrate.js', '--db', freshDb]);
   const freshJson = JSON.parse(freshSecond.stdout.trim());
   result.migrate =
-    freshJson.applied.length === 0 && freshJson.version === 9 && migrateTwice(dbPath);
+    freshJson.applied.length === 0 && freshJson.version === 10 && migrateTwice(dbPath);
 
   child = spawn(process.execPath, ['apps/server/dist/index.js'], {
     cwd: root,

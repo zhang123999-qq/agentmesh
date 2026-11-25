@@ -61,7 +61,7 @@ describe('error codes', () => {
 describe('method names', () => {
   it('lists every public method exactly once', () => {
     expect(new Set(METHOD_NAMES).size).toBe(METHOD_NAMES.length);
-    expect(METHOD_NAMES).toHaveLength(23);
+    expect(METHOD_NAMES).toHaveLength(26);
   });
 
   it('contains the required method names', () => {

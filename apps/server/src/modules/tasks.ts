@@ -102,15 +102,15 @@ export const MAX_SKILL_LENGTH = 64;
 export const MAX_BID_APPROACH_LENGTH = 2000;
 
 /** Roles allowed to publish tasks (the operator role). */
-export const TASK_PUBLISH_ROLES: readonly AuthContext['role'][] = ['admin'];
+export const TASK_PUBLISH_ROLES: readonly AuthContext['role'][] = ['admin', 'workspace_admin'];
 /** Roles allowed to read tasks (`observer` is not "agent+" and is excluded). */
-export const TASK_READ_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
+export const TASK_READ_ROLES: readonly AuthContext['role'][] = ['admin', 'workspace_admin', 'agent'];
 /** Roles allowed to place a bid. */
-export const TASK_BID_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
+export const TASK_BID_ROLES: readonly AuthContext['role'][] = ['admin', 'workspace_admin', 'agent'];
 /** Roles allowed to inspect the bid set / award a task. */
-export const TASK_AWARD_ROLES: readonly AuthContext['role'][] = ['admin'];
+export const TASK_AWARD_ROLES: readonly AuthContext['role'][] = ['admin', 'workspace_admin'];
 /** Roles that may report progress / complete / fail (subject to assignee check). */
-export const TASK_EXECUTION_ROLES: readonly AuthContext['role'][] = ['admin', 'agent'];
+export const TASK_EXECUTION_ROLES: readonly AuthContext['role'][] = ['admin', 'workspace_admin', 'agent'];
 /** Limits for progress notes / artifacts (references only, not content). */
 export const MAX_PROGRESS_NOTE_LENGTH = 2000;
 export const MAX_FAIL_REASON_LENGTH = 2000;

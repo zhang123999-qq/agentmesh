@@ -49,7 +49,7 @@ import {
 } from '@agentmesh/protocol';
 import { aggregateIdOf } from '@agentmesh/core';
 import type { EventStore } from '@agentmesh/core';
-import type { Account, AccountsDao, AgentMeshDatabase } from '@agentmesh/store';
+import type { Account, AccountsDao, AgentMeshDatabase, WorkspacesDao } from '@agentmesh/store';
 import { withTransaction } from '@agentmesh/store';
 
 import {
@@ -93,6 +93,8 @@ export interface AccountsModuleOptions {
   readonly registerRateLimit?: Partial<RegisterRateLimitConfig>;
   /** Registration limiter override (tests inject one with a controllable clock). */
   readonly registerLimiter?: RegistrationLimiter;
+  /** Tenant registry for invite redemption, quota and disabled checks (US-025). */
+  readonly workspaces?: WorkspacesDao;
   /** Account id generator (tests inject a deterministic one). */
   readonly idFactory?: () => string;
   /** Injectable clock for deterministic timestamps. */
@@ -433,6 +435,7 @@ export class AccountsService {
   readonly #clock: () => number;
   readonly #limiter: AuthFailureLimiter;
   readonly #registerLimiter: RegistrationLimiter;
+  readonly #workspaces: WorkspacesDao | undefined;
 
   constructor(options: AccountsModuleOptions) {
     this.#db = options.db;
@@ -451,6 +454,7 @@ export class AccountsService {
     this.#registerLimiter =
       options.registerLimiter ??
       new RegistrationLimiter({ ...options.registerRateLimit, clock: this.#clock });
+    this.#workspaces = options.workspaces;
   }
 
   /** The authenticate throttler (exposed for diagnostics/tests). */
@@ -470,7 +474,13 @@ export class AccountsService {
    */
   async register(
     input: RegisterAccountInput,
-    options: { readonly remoteAddress?: string } = {},
+    options: {
+      readonly remoteAddress?: string;
+      /** Target tenant (invite redemption). Defaults to the service tenant. */
+      readonly workspaceId?: string;
+      /** True when registration was authorised by a valid invite code. */
+      readonly viaInvite?: boolean;
+    } = {},
   ): Promise<RegisterAccountResult> {
     const name = input.name.trim();
     if (name.length === 0 || name.length > MAX_LABEL_LENGTH) {
@@ -488,7 +498,7 @@ export class AccountsService {
     }
     const role: Role = input.role ?? 'agent';
     if (!isAccountRole(role)) {
-      throw invalidParams('role must be one of admin, agent, observer', 'role');
+      throw invalidParams('role must be one of admin, workspace_admin, agent, observer', 'role');
     }
     if (role === 'admin' && !this.#allowAdminSelfRegister) {
       throw new ProtocolError(
@@ -496,6 +506,31 @@ export class AccountsService {
         'admin self-registration is disabled',
         { role, hint: 'set ALLOW_ADMIN_SELF_REGISTER=true or seed an admin' },
       );
+    }
+    // `workspace_admin` is only mintable through a valid invite (the code is the
+    // trust anchor for provisioning a tenant admin); never via anonymous register.
+    if (role === 'workspace_admin' && options.viaInvite !== true) {
+      throw new ProtocolError(
+        JsonRpcErrorCode.Forbidden,
+        'workspace_admin accounts are provisioned via an invite code',
+      );
+    }
+    const workspaceId = options.workspaceId ?? this.#workspaceId;
+    if (options.viaInvite === true) {
+      const ws = this.#workspaces?.get(workspaceId);
+      if (ws === undefined) {
+        throw new ProtocolError(JsonRpcErrorCode.NotFound, 'workspace not found');
+      }
+      if (ws.disabledAt !== null) {
+        throw new ProtocolError(JsonRpcErrorCode.Forbidden, 'workspace is disabled');
+      }
+      if (this.#accounts.count(workspaceId) >= ws.maxAgents) {
+        throw new ProtocolError(
+          JsonRpcErrorCode.QuotaExceeded,
+          'workspace agent quota exceeded',
+          { maxAgents: ws.maxAgents },
+        );
+      }
     }
     // DB truth: `accounts.name` is UNIQUE across the table, so judge
     // duplicates the same way instead of per (name, workspaceId).
@@ -527,15 +562,15 @@ export class AccountsService {
           skills,
           role,
           createdAt,
-          workspaceId: this.#workspaceId,
+          workspaceId,
         });
-        this.#accounts.setSecretHash(id, secretHash, this.#workspaceId);
+        this.#accounts.setSecretHash(id, secretHash, workspaceId);
         this.#events.append({
           aggregateId: aggregateIdOf('account', id),
           type: 'account.registered',
           payload,
           ts: createdAt,
-          workspaceId: this.#workspaceId,
+          workspaceId,
         });
       });
     } catch (err) {
@@ -545,7 +580,7 @@ export class AccountsService {
     }
 
     return {
-      ...(await this.#authenticateAs({ agentId: id, role }, this.#workspaceId)),
+      ...(await this.#authenticateAs({ agentId: id, role }, workspaceId)),
       secret,
     };
   }
@@ -671,10 +706,18 @@ export class AccountsService {
         ? `identifier:agentId:${agentId}`
         : `identifier:name:${(name ?? '').toLowerCase()}`;
 
-    const account =
+    let account =
       agentId !== undefined && agentId.length > 0
         ? this.#accounts.get(agentId, workspaceId)
         : this.#accounts.getByName(name ?? '', workspaceId);
+    if (account === undefined) {
+      // Fall back to a global lookup so a non-default tenant's member can
+      // authenticate by id/name without knowing its workspace (US-025 onboarding).
+      account =
+        agentId !== undefined && agentId.length > 0
+          ? this.#accounts.getAnyWorkspace(agentId)
+          : this.#accounts.getByNameAnyWorkspace(name ?? '');
+    }
     if (account === undefined) {
       // Probing unknown identities is still a failed attempt (own bucket, so
       // it can never lock out a real account).
@@ -689,6 +732,10 @@ export class AccountsService {
 
     // Known account: one bucket per account id, so reaching it by name or by
     // id shares the same counter.
+    const workspace = this.#workspaces?.get(account.workspaceId);
+    if (workspace !== undefined && workspace.disabledAt !== null) {
+      throw new ProtocolError(JsonRpcErrorCode.Forbidden, 'workspace is disabled');
+    }
     const key = `account:${account.id}`;
     // A verified token may refresh only its own identity; it is never proof of
     // another account's identity. It also proves the identity, so it resets
@@ -813,17 +860,46 @@ export function registerAccountsModule(
   registry.registerHandler(
     METHODS.agent.register,
     async (ctx, params) => {
-      const result = await service.register(parseRegisterInput(params), {
-        ...(ctx.remoteAddress === undefined ? {} : { remoteAddress: ctx.remoteAddress }),
-      });
+      const raw = asParamsObject(params, METHODS.agent.register);
+      const input = parseRegisterInput(params);
+      const inviteCode =
+        typeof raw.inviteCode === 'string' && raw.inviteCode.length > 0 ? raw.inviteCode : undefined;
+      const remote = ctx.remoteAddress === undefined ? {} : { remoteAddress: ctx.remoteAddress };
+
+      let registered;
+      if (inviteCode === undefined) {
+        registered = await service.register(input, remote);
+      } else {
+        const workspaces = options.workspaces;
+        if (workspaces === undefined) {
+          throw new ProtocolError(JsonRpcErrorCode.NotFound, 'invite codes are not accepted');
+        }
+        const ws = workspaces.findByInvite(inviteCode);
+        const now = (options.clock ?? Date.now)();
+        if (ws === undefined || ws.inviteExpiresAt === null || ws.inviteExpiresAt <= now) {
+          throw new ProtocolError(JsonRpcErrorCode.NotFound, 'invalid or expired invite code');
+        }
+        // An invite may only provision a tenant member or tenant admin.
+        if (input.role !== undefined && input.role !== 'agent' && input.role !== 'workspace_admin') {
+          throw new ProtocolError(
+            JsonRpcErrorCode.InvalidParams,
+            'invite registration allows role agent or workspace_admin',
+          );
+        }
+        registered = await service.register(input, {
+          ...remote,
+          workspaceId: ws.id,
+          viaInvite: true,
+        });
+      }
       ctx.logger.info({
-        agentId: result.agentId,
-        role: result.role,
+        agentId: registered.agentId,
+        role: registered.role,
         msg: 'account.registered',
       });
-      return result;
+      return registered;
     },
-    { description: 'Register an agent account and receive a scoped JWT' },
+    { description: 'Register an agent account (optionally via invite) and receive a scoped JWT' },
   );
 
   registry.registerHandler(

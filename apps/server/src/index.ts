@@ -37,6 +37,7 @@ export * from './modules/tasks.js';
 export * from './modules/system.js';
 export * from './modules/hash-chain.js';
 export * from './modules/revocation.js';
+export * from './modules/workspace.js';
 export * from './ws/framing.js';
 export * from './ws/session.js';
 export * from './ws/gateway.js';

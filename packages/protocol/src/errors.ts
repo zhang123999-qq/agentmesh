@@ -26,6 +26,7 @@ export const JsonRpcErrorCode = {
   RateLimited: -32005,
   ProtocolVersionIncompatible: -32006,
   VersionConflict: -32007,
+  QuotaExceeded: -32008,
 } as const;
 
 export type JsonRpcErrorCode = (typeof JsonRpcErrorCode)[keyof typeof JsonRpcErrorCode];
@@ -52,6 +53,7 @@ export const ERROR_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
   [JsonRpcErrorCode.RateLimited]: 'Rate limit exceeded',
   [JsonRpcErrorCode.ProtocolVersionIncompatible]: 'Incompatible protocol version',
   [JsonRpcErrorCode.VersionConflict]: 'Version conflict',
+  [JsonRpcErrorCode.QuotaExceeded]: 'Quota exceeded',
 });
 
 /** Default human-readable message for a code. */
