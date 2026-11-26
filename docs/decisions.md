@@ -763,3 +763,28 @@ agt_b1、`onlineAgents('default')` 不含；offline 仅本 workspace。故障注
 dispatcher 记录 rpc 计数与耗时直方图；`/metrics` 路由在渲染时计算 live gauge（ws 会话、hashchain、租户）。
 **测试 +3（server 300→303，共 593）**：registry 渲染单测；/metrics 集成（关键指标 + rpc 计数递增）；
 `METRICS_ENABLED=false` 返回 404。故障注入：dispatcher 不接 metrics → 集成计数断言红，恢复绿。
+
+## 备份与恢复制度化（7 个决策）
+
+1. **定时备份触发**：**外部 cron + `scripts/backup.sh`**（不在服务进程内起定时器）。
+   被否决：进程内定时器（备份失败/耗时不应拖累主进程）；容器 sidecar（复杂）。脚本内调用 backup CLI，
+   CLI 自带 `PRAGMA integrity_check`（失败非 0 退出）。
+2. **保留策略**：`BACKUP_KEEP`（默认 7）份；脚本 `ls -1t agentmesh-*.db | tail -n +KEEP+1` 清理旧备份。
+   配置项：`DB_PATH`、`BACKUP_DIR`、`BACKUP_KEEP`。
+3. **恢复演练**：`scripts/restore-drill.sh` 入库；发布前/每月执行；记录在 operations.md 表格。
+   演练内容：备份 → 复制到临时 DB → 起服务 → `/health` ok（hashChain ok）→ `/metrics`
+   `agentmesh_workspaces_total` 存在（可观测性天然校验点）。**本地已跑通一次（RESTORE DRILL PASS）。**
+4. **迁移前自动备份（关键，v11 依赖）**：`prepareMigrationBackup(dbPath)` 由**两条路径**共同调用：
+   - `migrate` CLI（手动迁移）；
+   - `startServer` 在 `openStore` 前（**自动启动迁移**，最易漏路径）。
+   规则：`:memory:`/缺失或 0 字节 → 跳过（empty/memory）；已是最新 → 跳过（no-pending）；
+   **非空且有待迁移 → 快照 + 完整性校验；失败抛错阻断迁移**。空库跳过是合理的（无数据可备份）。
+5. **跨版本**：规则是“**每次**迁移运行前，若有待迁移且库非空则备份”，不是“升级前备份一次”。
+6. **完整性/命名**：快照命名 `<db>.pre-v<target>.<ts>.bak`；先 `PRAGMA wal_checkpoint(TRUNCATE)` 再复制；
+   复制后 `PRAGMA integrity_check` 必须全 ok，否则删除半成品并抛错；backup CLI 亦校验产物。
+7. **指标/健康**：备份指标**暂不做**（备份在 cron 的独立进程中运行，无共享 registry；运维通过
+   文件 mtime + CLI 退出码 + 恢复演练监控）。**迁移前备份失败 = 启动失败**（比 /health 降级更直接）。
+
+**测试 +5（server 303→308，共 598）**：empty/memory 跳过；no-pending 跳过；非空 pending 生成快照且
+integrity ok；备份失败抛错且不留半成品；migrate CLI 在 pending 非空库上先备份再迁移。
+**故障注入**：让 helper 恒返回 no-pending（跳过备份）→ 快照/失败/CLI 三条测试红，恢复绿。

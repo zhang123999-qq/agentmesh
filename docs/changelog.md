@@ -2,6 +2,21 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-26 — 备份与恢复制度化
+
+测试基线：**598**（server 303 → 308）。schema v10 / RPC 26/26 不变。
+
+- **迁移前自动备份**：`prepareMigrationBackup(dbPath)`，由 **migrate CLI** 与 **startServer 自动迁移**
+  两条路径共同调用。规则：`:memory:`/缺失/0 字节 → 跳过；已最新 → 跳过；**非空且有待迁移 → 快照
+  （`<db>.pre-v<target>.<ts>.bak`，先 WAL checkpoint 再复制）+ integrity_check；失败抛错阻断迁移**。
+- backup CLI 增加产物 `PRAGMA integrity_check`（失败非 0）。
+- `scripts/backup.sh`（cron 定时备份 + `BACKUP_KEEP=7` 保留策略，复用 CLI integrity）；
+  `scripts/restore-drill.sh`（备份→恢复到临时库→起服务→`/health`+`/metrics` 校验）。
+  **本地演练 PASS**（health ok / hashChain ok / metrics ok）。
+- 测试（+5，server 303→308）：empty/memory 跳过；no-pending 跳过；非空 pending 生成快照且 integrity ok；
+  备份失败抛错且不留半成品；migrate CLI 先备份后迁移。故障注入：helper 恒跳过备份 → 3 条测试红，恢复绿。
+- 文档：decisions（7 决策）、operations（策略/cron/演练记录/迁移前规则）、security（备份安全）、README。
+
 ## 2026-11-23 — 可观测性（Prometheus /metrics）
 
 测试基线：**593**（server 300 → 303）。schema v10 不变，RPC 26/26 不变。

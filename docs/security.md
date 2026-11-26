@@ -127,3 +127,9 @@
 - `GET /metrics` 暴露 Prometheus 指标，**无应用层鉴权**（抓取通常不带 token）。必须通过网络边界限制
   （内网/VPN/反代 ACL），不得直接暴露公网；`METRICS_ENABLED=false` 可整体关闭。
 - 指标 label 仅用低基数键（`method`、`code`、`status`）；**不含** taskId/agentId/workspaceId/payload/secret。
+
+## 备份安全
+
+- 备份文件是明文 SQLite（含 `secret_hash` 摘要，非明文 secret），继承 OS/卷加密边界；
+  备份目录权限与数据库同级，不进仓库。
+- 迁移前自动备份失败会**中⽌迁移**（启动失败），避免在无安全网下做前向不可逆变更。

@@ -17,6 +17,8 @@ import {
   runMigrations,
 } from '@agentmesh/store';
 
+import { prepareMigrationBackup } from './migration-backup.js';
+
 export interface MigrateCliOptions {
   readonly dbPath: string;
 }
@@ -51,6 +53,12 @@ export function runMigrate(
   try {
     const { dbPath } = parseMigrateArgs(argv);
     mkdirSync(dirname(resolve(dbPath)), { recursive: true });
+    // Snapshot a non-empty database before any forward-only migration; a backup
+    // failure aborts the migration (throws → exit 1 below).
+    const backup = prepareMigrationBackup(dbPath);
+    if (backup.backupPath !== undefined) {
+      out(JSON.stringify({ msg: 'pre-migration backup', backupPath: backup.backupPath }));
+    }
     const db = openDatabase(dbPath);
     try {
       const result = runMigrations(db);

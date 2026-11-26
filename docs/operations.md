@@ -205,3 +205,22 @@ curl -kf https://localhost:8443/health
   - 错误率：`rate(agentmesh_rpc_requests_total{code!="ok"}[5m]) > 0.1`
   - 延迟 P95：`histogram_quantile(0.95, rate(agentmesh_rpc_duration_ms_bucket[5m])) > 1000`
   - 禁用租户：`agentmesh_workspaces_disabled > 0`（信息级）
+
+## 备份与恢复制度化
+
+- **定时备份（cron）**：`DB_PATH=data/agentmesh.db BACKUP_DIR=backups BACKUP_KEEP=7 scripts/backup.sh`
+  （backup CLI 产物经 `PRAGMA integrity_check` 校验；失败非 0 退出）。保留最新 `BACKUP_KEEP`（默认 7）份。
+  示例 crontab：`17 3 * * * cd /app && DB_PATH=/app/data/agentmesh.db scripts/backup.sh`
+- **迁移前自动备份**：`migrate` CLI 与 `startServer`（自动启动迁移）在应用前向迁移前都会调用
+  `prepareMigrationBackup`：空库/`:memory:`/已最新 → 跳过；非空且有待迁移 → 生成
+  `<db>.pre-v<target>.<ts>.bak` 并校验 integrity；**备份失败 → 迁移中止（启动失败）**。
+  规则是“每次迁移运行前”，不是“升级前一次”。
+- **恢复步骤**：停服 → 用备份替换 `agentmesh.db`（先删 `-wal`/`-shm`）→ 启动 → `/health` ok。
+- **恢复演练**：`scripts/restore-drill.sh [db]`（默认 `data/agentmesh.db`，缺失则用新建迁移库）。
+  演练断言：`/health` ok（hashChain ok）、`/metrics` 有 `agentmesh_workspaces_total`。
+- **演练记录表**：
+  | 日期 | 环境 | 源库 | 结果 | 备注 |
+  | --- | --- | --- | --- | --- |
+  | 2026-11-26 | Windows 本机 | 新建迁移库 | **PASS** | health ok / hashChain ok / metrics ok |
+- **备份安全**：`secret_hash` 是摘要（非明文 secret）；备份仍为明文 SQLite，继承 OS/卷加密；
+  **不要把备份提交进仓库**。

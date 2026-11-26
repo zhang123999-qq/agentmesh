@@ -19,6 +19,7 @@ import { openStore } from '@agentmesh/store';
 import type { FastifyInstance } from 'fastify';
 
 import { buildServer, type BuildServerOptions, type ServerStore } from './app.js';
+import { prepareMigrationBackup } from './cli/migration-backup.js';
 import { describeConfig, describeSecurityWarnings, loadConfig, type ServerConfig } from './config.js';
 import { serializeError } from './logging.js';
 import type { HandlerRegistry } from './registry.js';
@@ -59,8 +60,21 @@ export async function startServer(
   const config: ServerConfig = options.config ?? loadConfig();
   // Production path owns the SQLite handle: open + migrate before buildServer
   // so the account module (and future modules) are registered at construction.
-  const store: ServerStore = options.store ?? openStore(config.dbPath);
   const ownsStore = options.store === undefined;
+  // Forward-only migrations: snapshot a non-empty database before the automatic
+  // startup migration. A backup failure throws here, so startup aborts rather
+  // than migrating without a safety net.
+  if (ownsStore) {
+    const backup = prepareMigrationBackup(config.dbPath);
+    if (backup.backupPath !== undefined) {
+      // Logged via console here because the pino logger is created inside the
+      // app; this happens before buildServer.
+      process.stdout.write(
+        `${JSON.stringify({ msg: 'pre-migration backup', backupPath: backup.backupPath })}\n`,
+      );
+    }
+  }
+  const store: ServerStore = options.store ?? openStore(config.dbPath);
   const app = buildServer({ ...options, config, store });
 
   if (ownsStore) {

@@ -72,7 +72,18 @@ export async function runBackup(
     } finally {
       db.close();
     }
-    out(JSON.stringify({ dbPath, outPath, ok: true }));
+    // Verify the produced snapshot is a healthy SQLite database; a backup that
+    // cannot be restored is worse than none.
+    const verify = openDatabase(outPath, { readonly: true, fileMustExist: true });
+    try {
+      const rows = verify.pragma('integrity_check') as Array<{ integrity_check: string }>;
+      if (!rows.every((row) => row.integrity_check === 'ok')) {
+        throw new Error('backup integrity_check did not report ok');
+      }
+    } finally {
+      verify.close();
+    }
+    out(JSON.stringify({ dbPath, outPath, ok: true, integrity: 'ok' }));
     return 0;
   } catch (error) {
     err(error instanceof Error ? error.message : String(error));
