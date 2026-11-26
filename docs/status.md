@@ -29,9 +29,9 @@
 | US-024 | **完成（本地验证）** | presence 按 workspace 分片：`#connections` 分片、online/offline 广播按 workspace 过滤；Web events 流天然只收本租户 |
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
 
-测试基线：**590**
-（core 55 / protocol 109 / store **76** / sdk 9 / adapters 7 / mock-agents 1 / server **300** / cli 22 / **web 11**）。
-schema 版本：**v10**（US-025 租户生命周期）。RPC **26/26**。
+测试基线：**593**
+（core 55 / protocol 109 / store **76** / sdk 9 / adapters 7 / mock-agents 1 / server **303** / cli 22 / **web 11**）。
+schema 版本：**v10**（US-025 租户 lifecycle）。RPC **26/26**。可观测：`/metrics`（Prometheus）。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷

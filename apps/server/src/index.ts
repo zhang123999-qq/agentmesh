@@ -26,6 +26,7 @@ import type { HandlerRegistry } from './registry.js';
 export * from './config.js';
 export * from './logging.js';
 export * from './registry.js';
+export * from './metrics.js';
 export * from './dispatcher.js';
 export * from './auth/roles.js';
 export * from './auth/token.js';

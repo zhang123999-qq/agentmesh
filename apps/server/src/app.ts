@@ -52,6 +52,7 @@ import { registerSystemModule } from './modules/system.js';
 import { HashChainMonitor } from './modules/hash-chain.js';
 import { registerRevocationModule } from './modules/revocation.js';
 import { registerWorkspaceModule } from './modules/workspace.js';
+import { MetricsRegistry } from './metrics.js';
 import { TokenRevocationRegistry } from './auth/revocation.js';
 import { createHandlerRegistry, type HandlerRegistry } from './registry.js';
 import { WsGateway, type WsGatewayOptions } from './ws/gateway.js';
@@ -149,6 +150,8 @@ declare module 'fastify' {
     tokens: TokenService;
     /** In-memory token revocation registry (US-021D). */
     revocations: TokenRevocationRegistry;
+    /** Observability metrics registry. */
+    metrics: MetricsRegistry;
     /** Account service, present when the account module is registered. */
     accounts?: AccountsService;
     /** Channel/message service, present when the US-007 module is registered. */
@@ -176,6 +179,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const config = options.config ?? loadConfig();
   const logger = options.logger ?? createLogger({ level: config.logLevel });
   const registry = options.registry ?? createHandlerRegistry();
+  // Observability: in-house registry (no external dependency); the dispatcher
+  // feeds rpc counters/histograms and /metrics renders live gauges.
+  const metrics = new MetricsRegistry();
 
   // In-memory token revocation registry (US-021D); shared by the token service
   // (enforcement inside verify) and the `agent.revokeToken` handler.
@@ -198,6 +204,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     logger,
     workspaceId: 'default',
     tokenVerifier: (token) => tokens.verify(token),
+    metrics,
     onSystemError: async (payload) => {
       await options.onSystemError?.(payload);
       for (const sink of systemErrorSinks) await sink(payload);
@@ -225,6 +232,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   app.decorate('startedAt', startedAt);
   app.decorate('tokens', tokens);
   app.decorate('revocations', revocations);
+  app.decorate('metrics', metrics);
 
   // ---- feature modules ---------------------------------------------------
   const store = options.store;
@@ -432,6 +440,45 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       // US-021C: coarse integrity state; never payloads or secrets.
       hashChain: app.hashChain?.state.status ?? 'unchecked',
     };
+  });
+
+  // Observability: Prometheus text exposition. Live gauges are computed at
+  // render time from the gateway/hash-chain/workspace registry, so no extra
+  // instrumentation is needed for those. Never exposes payloads or secrets.
+  app.get('/metrics', async (_request, reply) => {
+    if (!config.metricsEnabled) {
+      reply.code(404);
+      return '';
+    }
+    reply.header('content-type', 'text/plain; version=0.0.4; charset=utf-8');
+    reply.header('cache-control', 'no-store');
+
+    metrics.setGauge(
+      'agentmesh_ws_sessions',
+      app.ws?.sessionCount ?? 0,
+      {},
+      'Active WebSocket sessions',
+    );
+    const hc = app.hashChain?.state.status ?? 'unchecked';
+    for (const status of ['ok', 'mismatch', 'unchecked'] as const) {
+      metrics.setGauge(
+        'agentmesh_hashchain_status',
+        status === hc ? 1 : 0,
+        { status },
+        'Hash-chain verification state (1 for the current state)',
+      );
+    }
+    if (app.store !== undefined) {
+      const workspaces = app.store.repos.workspaces.list();
+      metrics.setGauge('agentmesh_workspaces_total', workspaces.length, {}, 'Tenants');
+      metrics.setGauge(
+        'agentmesh_workspaces_disabled',
+        workspaces.filter((w) => w.disabledAt !== null).length,
+        {},
+        'Disabled tenants',
+      );
+    }
+    return metrics.render();
   });
 
   if (options.exposeHttpRpc !== false) {

@@ -64,7 +64,7 @@ npm install                 # 根目录安装，workspaces 自动联动
 npm run build               # 全包构建（--workspaces --if-present）
 npm run typecheck           # 全包类型检查
 npm run lint                # 全包 ESLint
-npm test                    # 全包单元测试（vitest，当前 590 个，含 web 11）
+npm test                    # 全包单元测试（vitest，当前 593 个，含 web 11）
 npm run demo                # 起真实服务端 + 三 mock agent 的端到端演示
 npm run verify:docker       # 无 Docker 引擎时的本地部署等价验证
 npm run verify              # typecheck + lint + test（提交前统一校验）
@@ -164,3 +164,11 @@ MVP 不强制覆盖率数字，但 `packages/core`、`packages/store` 与 `apps/
   ```
   e2e 见「Web 浏览器 e2e」小节。CI 失败时按 badge → Actions 日志定位。
 - **CI 通过 ≠ M9 签字**：M9 需要真实 Docker + 人工签字（见 [docs/operations.md](docs/operations.md)）。
+
+## 可观测性（`/metrics`）
+
+- `GET /metrics` 暴露 Prometheus 文本指标：`agentmesh_rpc_requests_total{method,code}`、
+  `agentmesh_rpc_duration_ms{method}`、`agentmesh_ws_sessions`、`agentmesh_hashchain_status{status}`、
+  `agentmesh_workspaces_total` / `agentmesh_workspaces_disabled`。
+- `METRICS_ENABLED=false` 关闭（返回 404）。**仅内网/反代 ACL 可达**，不要直连公网。
+- 本地：`curl -s localhost:8787/metrics`。告警规则示例见 [docs/operations.md](docs/operations.md)。

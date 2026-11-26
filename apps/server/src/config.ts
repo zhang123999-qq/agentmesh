@@ -107,6 +107,8 @@ export const DEFAULT_TASK_RECLAIM_INTERVAL_SECONDS = 60;
 export const DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS = 0;
 /** Run a hash-chain verification once at startup (US-021C). */
 export const DEFAULT_HASH_CHAIN_VERIFY_ON_STARTUP = true;
+/** Expose the Prometheus `/metrics` endpoint. Default: on (restrict via network). */
+export const DEFAULT_METRICS_ENABLED = true;
 /** Periodic hash-chain verification interval (seconds); 0 disables the timer. */
 export const DEFAULT_HASH_CHAIN_VERIFY_INTERVAL_SECONDS = 3600;
 
@@ -185,6 +187,8 @@ export interface ServerConfig {
   readonly hashChainVerifyOnStartup: boolean;
   /** Periodic hash-chain verification interval (seconds); 0 = disabled. */
   readonly hashChainVerifyIntervalSeconds: number;
+  /** Expose the Prometheus `/metrics` endpoint (default true). */
+  readonly metricsEnabled: boolean;
   /** `development` | `test` | `production` | anything the deployer sets. */
   readonly nodeEnv: string;
   readonly isProduction: boolean;
@@ -540,6 +544,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       'HASH_CHAIN_VERIFY_INTERVAL_SECONDS',
       DEFAULT_HASH_CHAIN_VERIFY_INTERVAL_SECONDS,
       86_400, // max 24 hours
+    ),
+    metricsEnabled: parseBoolean(
+      env.METRICS_ENABLED,
+      'METRICS_ENABLED',
+      DEFAULT_METRICS_ENABLED,
     ),
     nodeEnv,
     isProduction,

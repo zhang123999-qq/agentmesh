@@ -34,6 +34,7 @@ import type { Logger } from 'pino';
 import { serializeError } from './logging.js';
 import { readTokenFromParams } from './auth/token.js';
 import type { AuthContext } from './auth/roles.js';
+import type { MetricsRegistry } from './metrics.js';
 import { DEFAULT_WORKSPACE_ID, type HandlerRegistry } from './registry.js';
 
 /** Transport-provided context for one inbound message. */
@@ -104,6 +105,8 @@ export interface RpcDispatcherOptions {
    * `buildServer`; omitted in tests that do not exercise authentication.
    */
   readonly tokenVerifier?: (token: string) => Promise<AuthContext> | AuthContext;
+  /** Optional metrics sink for rpc request/duration counters (observability). */
+  readonly metrics?: MetricsRegistry;
 }
 
 /**
@@ -244,12 +247,14 @@ export class RpcDispatcher {
   readonly #reqIdFactory: () => string;
   readonly #onSystemError?: SystemErrorNotifier;
   readonly #tokenVerifier?: (token: string) => Promise<AuthContext> | AuthContext;
+  readonly #metrics?: MetricsRegistry;
 
   constructor(options: RpcDispatcherOptions) {
     this.#registry = options.registry;
     this.#logger = options.logger;
     this.#workspaceId = options.workspaceId ?? DEFAULT_WORKSPACE_ID;
     this.#reqIdFactory = options.reqIdFactory ?? (() => randomUUID());
+    this.#metrics = options.metrics;
     if (options.onSystemError !== undefined) {
       this.#onSystemError = options.onSystemError;
     }
@@ -459,6 +464,17 @@ export class RpcDispatcher {
         frame.params ?? {},
       );
       const durationMs = elapsed();
+      this.#metrics?.observe(
+        'agentmesh_rpc_duration_ms',
+        durationMs,
+        { method },
+        'RPC handler duration in milliseconds',
+      );
+      this.#metrics?.incCounter(
+        'agentmesh_rpc_requests_total',
+        { method, code: 'ok' },
+        'RPC requests by method and outcome',
+      );
       log.info({
         method,
         agentId: callerId,
@@ -477,6 +493,17 @@ export class RpcDispatcher {
     } catch (err) {
       const durationMs = elapsed();
       const errorObject = errorObjectFor(err);
+      this.#metrics?.observe(
+        'agentmesh_rpc_duration_ms',
+        durationMs,
+        { method },
+        'RPC handler duration in milliseconds',
+      );
+      this.#metrics?.incCounter(
+        'agentmesh_rpc_requests_total',
+        { method, code: String(errorObject.code) },
+        'RPC requests by method and outcome',
+      );
       const expected = err instanceof ProtocolError;
 
       log[expected ? 'warn' : 'error']({

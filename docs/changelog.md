@@ -2,6 +2,22 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-23 — 可观测性（Prometheus /metrics）
+
+测试基线：**593**（server 300 → 303）。schema v10 不变，RPC 26/26 不变。
+
+- 内置零依赖 `MetricsRegistry`（counter / gauge / histogram + Prometheus 文本渲染）——不引 prom-client
+  （lockfile/arborist 约束 + 缩小审计面）。
+- `GET /metrics`（`METRICS_ENABLED` 默认 true，可关）：`agentmesh_rpc_requests_total{method,code}`、
+  `agentmesh_rpc_duration_ms{method}`、`agentmesh_ws_sessions`、`agentmesh_hashchain_status{status}`、
+  `agentmesh_workspaces_total/disabled`。label 只用低基数键（无 taskId/agentId/workspaceId）。
+- dispatcher 记录 rpc 计数与耗时直方图；/metrics 渲染时计算 live gauge（ws 会话、hashchain、租户）。
+- 安全：/metrics 无应用层鉴权，必须仅内网/反代 ACL 可达（security.md 写明）。
+- 测试（+3，server 300→303）：registry 渲染；/metrics 集成（关键指标 + rpc 计数递增）；
+  `METRICS_ENABLED=false` → 404。故障注入：dispatcher 不接 metrics → 计数断言红，恢复绿。
+- `verify-local.mjs`（docker job，Linux）新增 `/metrics` 冒烟（`agentmesh_ws_sessions` + hashchain）。
+- 回归：verify + CI（verify/web-e2e/docker）随提交复跑。
+
 ## 2026-11-23 — US-025 租户创建 / 跨租户登记 / 运维（v10）
 
 测试基线：**590**（store 74→76，server 293→300）。schema **v9 → v10**。RPC **23/23 → 26/26**。

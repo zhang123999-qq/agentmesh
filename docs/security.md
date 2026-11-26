@@ -121,3 +121,9 @@
 - 禁用：`workspace.disable` 阻止**新**登录/注册（-32002），不主动踢已建立 socket；`default` 不可禁用。
 - 配额：`maxAgents`（v10 列，默认 100），邀请 redeem 超限返回 **-32008**。
 - 越权：`workspace_admin` 只能操作本租户；平台操作仅 `admin`（跨租户 workspace.* → -32002）。
+
+## 指标端点（可观测性）
+
+- `GET /metrics` 暴露 Prometheus 指标，**无应用层鉴权**（抓取通常不带 token）。必须通过网络边界限制
+  （内网/VPN/反代 ACL），不得直接暴露公网；`METRICS_ENABLED=false` 可整体关闭。
+- 指标 label 仅用低基数键（`method`、`code`、`status`）；**不含** taskId/agentId/workspaceId/payload/secret。

@@ -738,3 +738,28 @@ agt_b1、`onlineAgents('default')` 不含；offline 仅本 workspace。故障注
 590）：create/list；invite redeem 落目标租户、无 invite 落 default；无效/过期 invite -32004；配额 -32008；
 禁用拒新 auth 与 invite redeem -32002；workspace_admin 可发任务但不能建租户；匿名/agent 负向。
 故障注入：关闭配额校验 → 配额测试红，恢复绿。
+
+## 可观测性与告警（6 个决策）
+
+1. **暴露方式**：**Prometheus `/metrics`（文本格式），内置零依赖 `MetricsRegistry`**。
+   被否决：`prom-client`（新增 runtime 依赖需重生成 lockfile，本机 npm/arborist 缺陷无法完成；且扩大审计面）；
+   OTel（依赖重、单机收益低）。`/metrics` **不做应用层鉴权**（Prometheus 抓取通常不带 token），
+   由**网络边界**限制（内网/VPN 或反代 ACL）；`METRICS_ENABLED`（默认 true）可整体关闭。
+2. **指标清单与基数**（label 只用低基数键；**taskId/agentId/workspaceId 永不进 label**）：
+   - `agentmesh_rpc_requests_total{method,code}`（counter；method 26、code 为错误码或 `ok`）；
+   - `agentmesh_rpc_duration_ms`（histogram，固定 ms 桶，`{method}`）；
+   - `agentmesh_ws_sessions`（gauge，活跃 socket）；
+   - `agentmesh_hashchain_status{status}`（gauge，ok/mismatch/unchecked，当前态置 1）；
+   - `agentmesh_workspaces_total` / `agentmesh_workspaces_disabled`（gauge，聚合值）。
+   租户维度**不做** per-workspace label（基数爆炸）；配额 -32008 通过 `rpc_requests_total{code="-32008"}` 体现。
+3. **告警通道**：`/health`（含 hashChain）+ `/metrics`，**由外部监控定义告警规则**；不引入 webhook 依赖。
+4. **tracing**：本周期**不引入** OTel；复审条件：多实例 / 跨服务调用出现。
+5. **CI**：`verify-local.mjs`（docker job，Linux）断言 `/metrics` 暴露 `agentmesh_ws_sessions` /
+   `agentmesh_hashchain_status`；server 集成测试断言关键指标 + 计数器随 RPC 递增。
+6. **与 US-025**：`workspace.*` 调用次数通过 `rpc_requests_total{method="workspace.create|list|disable"}`
+   体现；租户总数/禁用数仅作聚合 gauge，不带 workspaceId。
+
+**实现**：`apps/server/src/metrics.ts`（`MetricsRegistry`：counter/gauge/histogram + Prometheus 文本渲染）；
+dispatcher 记录 rpc 计数与耗时直方图；`/metrics` 路由在渲染时计算 live gauge（ws 会话、hashchain、租户）。
+**测试 +3（server 300→303，共 593）**：registry 渲染单测；/metrics 集成（关键指标 + rpc 计数递增）；
+`METRICS_ENABLED=false` 返回 404。故障注入：dispatcher 不接 metrics → 集成计数断言红，恢复绿。

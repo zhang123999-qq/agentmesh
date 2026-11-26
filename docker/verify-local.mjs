@@ -24,6 +24,7 @@ const freshDb = join(temp, 'fresh.db');
 const backupPath = join(temp, 'backup.db');
 const result = {
   health: false,
+  metrics: false,
   gracefulShutdown: false,
   migrate: false,
   backup: false,
@@ -100,6 +101,15 @@ try {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
   if (!result.health) throw new Error('GET /health did not return 200');
+
+  // Observability smoke: /metrics must expose the Prometheus exposition.
+  const metricsRes = await fetch(`http://127.0.0.1:${port}/metrics`);
+  const metricsBody = await metricsRes.text();
+  result.metrics =
+    metricsRes.status === 200 &&
+    metricsBody.includes('agentmesh_ws_sessions') &&
+    metricsBody.includes('agentmesh_hashchain_status');
+  if (!result.metrics) throw new Error('GET /metrics did not expose expected metrics');
   if (!existsSync(dbPath)) throw new Error('server did not create DB_PATH');
 
   // Wait a bit for compaction timer to trigger at least once

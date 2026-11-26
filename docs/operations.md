@@ -189,3 +189,19 @@ curl -kf https://localhost:8443/health
   （`default` 不可禁用）。禁用后该租户新登录/注册被拒（`-32002`），既有 socket 不主动断开。
 - 配额：`max_agents`（默认 100），超限 `-32008`。
 - v10 迁移前向不可逆，升级前备份（见「数据库迁移」）。
+
+## 指标与告警（可观测性）
+
+- `GET /metrics`：Prometheus 文本格式；`METRICS_ENABLED=false` 时返回 404。
+- 指标：
+  - `agentmesh_rpc_requests_total{method,code}`（code=`ok` 或错误码，含 -32008）；
+  - `agentmesh_rpc_duration_ms{method}`（histogram，ms）；
+  - `agentmesh_ws_sessions`（活跃 socket）；
+  - `agentmesh_hashchain_status{status}`（ok/mismatch/unchecked，当前态置 1）；
+  - `agentmesh_workspaces_total` / `agentmesh_workspaces_disabled`。
+- **安全**：`/metrics` 无应用层鉴权，**必须仅内网 / 反代 ACL 可达**，不要直接暴露公网。
+- 告警规则示例（由外部 Prometheus/告警器定义；AgentMesh 只暴露指标）：
+  - hashChain 不一致：`agentmesh_hashchain_status{status="mismatch"} == 1`
+  - 错误率：`rate(agentmesh_rpc_requests_total{code!="ok"}[5m]) > 0.1`
+  - 延迟 P95：`histogram_quantile(0.95, rate(agentmesh_rpc_duration_ms_bucket[5m])) > 1000`
+  - 禁用租户：`agentmesh_workspaces_disabled > 0`（信息级）
