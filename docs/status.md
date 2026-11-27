@@ -32,7 +32,8 @@
 
 测试基线：**608**
 （core 55 / protocol 109 / store **78** / sdk 9 / adapters 7 / mock-agents 1 / server **316** / cli 22 / **web 11**）。
-schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本。
+schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本
+（**2026-11-27 生产库演练 PASS**：含租户/消息/任务/撤销表，恢复后及二次重启后撤销仍 -32001）。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷

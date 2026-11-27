@@ -216,12 +216,26 @@ curl -kf https://localhost:8443/health
   `<db>.pre-v<target>.<ts>.bak` 并校验 integrity；**备份失败 → 迁移中止（启动失败）**。
   规则是“每次迁移运行前”，不是“升级前一次”。
 - **恢复步骤**：停服 → 用备份替换 `agentmesh.db`（先删 `-wal`/`-shm`）→ 启动 → `/health` ok。
-- **恢复演练**：`scripts/restore-drill.sh [db]`（默认 `data/agentmesh.db`，缺失则用新建迁移库）。
-  演练断言：`/health` ok（hashChain ok）、`/metrics` 有 `agentmesh_workspaces_total`。
+- **恢复演练（冒烟）**：`scripts/restore-drill.sh [db]`（默认 `data/agentmesh.db`，缺失则用新建迁移库）。
+  只断言 `/health` ok（hashChain ok）与 `/metrics` 有 `agentmesh_workspaces_total`，用于快速连通性检查。
+- **恢复演练（生产库，发布前/每月）**：`node scripts/production-restore-drill.mjs`（需先 `npm run build`）。
+  在临时库上经公开 RPC 造出真实数据（2 个租户 + default、4 个账号、8 条消息、1 个 `done` 任务、
+  1 个禁用租户、1 条 v11 撤销记录），然后停服 → `backup` CLI 快照 → 复制为恢复库 → 起服务校验：
+  - `/health.hashChain=ok`；
+  - `/metrics` 三项与源库逐项相等（`workspaces_total=3`、`workspaces_disabled=1`、
+    `revoked_tokens_active=1`）；
+  - 消息数（default 3 / ws-drill 5）、任务终态 `done`、跨租户频道可见性一致；
+  - 行数逐表相等（accounts/workspaces/channels/messages/tasks/task_bids/revoked_tokens/events）；
+  - 被撤销 token 恢复后仍 `-32001`，**第二次重启后仍 `-32001`**；
+  - 跨租户权限仍为 `-32002`（跨租户撤销）/`-32004`（跨租户读）；
+  - 负向对照：损坏数据库启动失败（证明演练的启动断言能识别坏备份）；断言函数自检。
+  成功输出 `RESTORE DRILL PASS (N assertions)`；证据（步骤、指标、行数、耗时）写入
+  `.drill-tmp/evidence.json`。失败时非 0 退出且 `evidence.json` 带 `failure`。
 - **演练记录表**：
   | 日期 | 环境 | 源库 | 结果 | 备注 |
   | --- | --- | --- | --- | --- |
-  | 2026-11-26 | Windows 本机 | 新建迁移库 | **PASS** | health ok / hashChain ok / metrics ok |
+  | 2026-11-26 | Windows 本机 | 新建迁移库 | **PASS** | 冒烟：health ok / hashChain ok / metrics ok（空库，不含业务/撤销数据） |
+  | 2026-11-27 | Windows 本机（Node 22） | 生产库（2 租户 / 8 消息 / 1 done 任务 / 1 撤销 / 1 禁用租户） | **PASS（22 断言，2.3s）** | hashChain ok；metrics 3/1/1 一致；rows accounts=4 workspaces=3 channels=2 messages=8 tasks=1 task_bids=1 revoked_tokens=1 events=25；恢复后与二次重启后撤销仍 -32001；跨租户 -32002/-32004；损坏库启动失败 |
 - **备份安全**：`secret_hash` 是摘要（非明文 secret）；备份仍为明文 SQLite，继承 OS/卷加密；
   **不要把备份提交进仓库**。
 
@@ -231,5 +245,5 @@ curl -kf https://localhost:8443/health
 - **清理**：`REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS`（默认 3600，0 关闭）定时删除过期行；
   结构化日志 `revoked.tokens.cleanup.started/.cleared`；`verify:docker` 断言。
 - **指标**：`GET /metrics` 的 `agentmesh_revoked_tokens_active`（当前未过期撤销数）。
-- **备份/恢复**：撤销表随库备份；恢复演练 `scripts/restore-drill.sh` 覆盖（恢复后旧 token 仍 -32001）。
+- **备份/恢复**：撤销表随库备份；`scripts/production-restore-drill.mjs` 已实测覆盖（恢复后及二次重启后旧 token 仍 -32001，`revoked_tokens_active` 恢复前后一致）。
 - 跨租户撤销：调用者 workspace 必须等于目标 token 的 workspace，否则 -32002。

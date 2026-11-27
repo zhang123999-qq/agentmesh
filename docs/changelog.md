@@ -2,6 +2,23 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 生产库恢复演练（覆盖 v11 撤销表）
+
+测试基线：**608** 不变（无代码/测试改动，只有演练脚本与文档）。schema v11 / RPC 26/26 不变。
+
+- 新增 `scripts/production-restore-drill.mjs`：经公开 HTTP JSON-RPC 在临时库造真实数据
+  （default + ws-drill 两个租户、4 账号、8 消息、1 个走完 bidding→done 的任务、1 个禁用租户、
+  1 条 v11 撤销记录），停服 → backup CLI → 恢复到独立文件 → 起服务逐项比对。
+- 断言（22 条全 PASS，2.3s）：hashChain ok；metrics `workspaces_total=3` /
+  `workspaces_disabled=1` / `revoked_tokens_active=1` 恢复前后一致；消息数 3/5、任务 done、
+  租户频道隔离一致；逐表行数一致（events=25 等）；被撤销 token 恢复后与**二次重启后**
+  均 `-32001`；跨租户撤销 `-32002`、跨租户读 `-32004`。
+- 负向对照：损坏数据库启动失败（exit 1）；`assertEqual` 自检在不等值时抛错——证明演练断言
+  不是恒真。证据写 `.drill-tmp/evidence.json`。
+- 删除损坏的未跟踪脚本 `scripts/seed-production-db.js`（ESM 项目里用 `require` 且调不存在的 DAO API），
+  由上述 HTTP 驱动的 harness 取代。
+- 文档：operations（演练步骤/断言/记录表新增 PASS 行；v11 撤销恢复结论改为已实测）、README。
+
 ## 2026-11-27 — 撤销持久化 v11（US-021D follow-up）
 
 测试基线：**608**（store 76 → 78，server 308 → 316）。schema **v10 → v11**。RPC 26/26 不变。

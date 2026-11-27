@@ -176,6 +176,7 @@ MVP 不强制覆盖率数字，但 `packages/core`、`packages/store` 与 `apps/
 ## 备份与恢复
 
 - 定时备份：`scripts/backup.sh`（`DB_PATH` / `BACKUP_DIR` / `BACKUP_KEEP=7`，CLI 自带 integrity_check）。
-- 恢复演练：`scripts/restore-drill.sh`（备份→恢复→起服务→`/health`+`/metrics` 校验）。
+- 恢复演练：`scripts/restore-drill.sh`（冒烟：备份→恢复→起服务→`/health`+`/metrics`）；
+  `scripts/production-restore-drill.mjs`（生产库：租户/消息/任务/撤销表逐项比对，见运维手册）。
 - **迁移前自动备份**：`migrate` CLI 与 `startServer` 自动迁移都会先对非空库快照；备份失败即中止迁移。
 - 详见 [docs/operations.md](docs/operations.md)「备份与恢复制度化」。

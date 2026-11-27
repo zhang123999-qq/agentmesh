@@ -48,3 +48,6 @@ apps/web/test-results/
 # backup artifacts
 backups/
 *.bak
+
+# restore drill scratch (databases + evidence)
+.drill-tmp/

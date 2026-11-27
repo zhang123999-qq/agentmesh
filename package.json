@@ -20,6 +20,7 @@
     "verify": "npm test && npm run typecheck && npm run lint && npm run build -w @agentmesh/web && npm run audit --omit=dev -w @agentmesh/web",
     "audit": "npm audit --audit-level=high",
     "demo": "npm run build && npm run demo -w @agentmesh/mock-agents",
+    "drill:restore": "npm run build && node scripts/production-restore-drill.mjs",
     "verify:docker": "npm run build && node docker/verify-local.mjs",
     "clean": "npm run clean --workspaces --if-present"
   },
