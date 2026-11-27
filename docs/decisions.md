@@ -1151,3 +1151,30 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - `packages/sdk/src/index.ts`、`types.ts` 为 0 可执行行（纯 re-export / 类型），0% 无意义。
 - 覆盖率仍是**行/分支**度量，不等于行为正确性；本次正向订阅测试即为反例（行覆盖低掩盖了断线）。
 
+## 压测实测记录（2026-11-27）
+
+### 执行情况
+- 脚本：`scripts/load-test.mjs`
+- 测试并发：5 / 10 / 20（受限于注册速率限制 30/min）
+- 测试时长：10s/并发级
+
+### 关键发现
+1. **注册速率限制**：`RegistrationLimiter` 默认 30 次/分钟/IP，阻碍快速创建测试账号。测试用 2.5s 间隔注册 20 个账号耗时 ~50s。
+2. **Admin 权限缺失**：`agent.register` 创建的账号默认 `role=agent`，无法调用 `task.publish` / `task.award`（返回 -32002 Forbidden）。需用 `seed:admin` CLI 或开启 `ALLOW_ADMIN_SELF_REGISTER`。
+3. **参数校验失败**：`message.send` 与 `channel.join` 返回 -32602（Invalid params），`channelId must be a string`。疑似测试脚本中 `channelIds` 数组在异步闭包中为空，或频道成员校验拦截。
+4. **WS 广播未触达**：连接建立成功、握手完成，但收不到 `message.new` 通知。疑似频道成员关系未生效或订阅机制问题。
+
+### 实测指标（受限于上述问题，非真实上限）
+| 指标 | 实测值 |
+|------|--------|
+| 最大并发 WS | 20（测试上限） |
+| message.send 吞吐 | 0/s（全 -32602 失败） |
+| task.publish 吞吐 | 0/s（全 -32002 失败） |
+| WS 消息投递率 | 0% |
+| `/metrics` RPC 计数 | 正常累增（含错误码统计） |
+
+### 后续动作
+- [ ] 修复测试脚本：用 `seed:admin` 创建真实 admin，临时禁用注册限流，排查 `channelId` 参数问题
+- [ ] 修复后重新执行压测，获取真实容量上限
+- [ ] 将实测数据回填 `docs/operations.md` 容量估算表
+
