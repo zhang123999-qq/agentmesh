@@ -29,6 +29,12 @@ export interface HandlerContext {
   readonly role?: Role;
   /** Peer address of the transport connection, when the transport knows it. */
   readonly remoteAddress?: string;
+  /**
+   * Transport session handle (WebSocket), forwarded opaquely by the dispatcher.
+   * Used by `system.subscribe` to attach per-session domain-event filtering.
+   * Only the stable `id` is part of this contract.
+   */
+  readonly session?: { readonly id: string };
 }
 
 /** Decoded JSON-RPC `params` (named object or positional array). */

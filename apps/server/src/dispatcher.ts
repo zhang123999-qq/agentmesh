@@ -59,6 +59,8 @@ export interface DispatchContext {
   readonly token?: string;
   /** Peer address of the transport connection, used for anonymous limits. */
   readonly remoteAddress?: string;
+  /** Transport session handle; forwarded to handlers unchanged (WS only). */
+  readonly session?: { readonly id: string };
 }
 
 /**
@@ -460,6 +462,7 @@ export class RpcDispatcher {
           ...(ctx.remoteAddress === undefined
             ? {}
             : { remoteAddress: ctx.remoteAddress }),
+          ...(ctx.session === undefined ? {} : { session: ctx.session }),
         },
         frame.params ?? {},
       );

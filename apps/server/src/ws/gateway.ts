@@ -709,6 +709,10 @@ export class WsGateway {
         ? {}
         : { remoteAddress: session.remoteAddress }),
       logger: session.logger,
+      // Forwarded to handlers so `system.subscribe` can attach its per-session
+      // domain-event subscription (US-020). Without this the RPC answers
+      // `subscribed: true` but the session never receives domain events.
+      session,
     });
 
     if (outcome.response !== undefined) {

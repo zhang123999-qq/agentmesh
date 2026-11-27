@@ -2,6 +2,24 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 修复 `system.subscribe` 订阅从未生效（US-020 根因）
+
+测试基线：**611 → 612**（server 319 → 320）。schema / RPC 26/26 / seq / 哈希不变。
+
+- **根因**：`system.subscribe` 处理器通过 `ctx.session` 读取连接会话，但该字段从未被传递：
+  `DispatchContext` 没有 `session`，dispatcher 构造 handler context 时也不转发，
+  gateway 调 `dispatch` 时也没带上 `session`。结果：RPC 返回 `subscribed: true`，
+  但 `gateway.setSessionSubscription` 从未执行，**domain-only 事件永远到不了已订阅 socket**。
+- **为何之前全绿**：既有测试只覆盖了 admin-only 拒绝与"未订阅时 domain 事件不上线"，
+  没有一条测试走 `system.subscribe → 匹配 domain 事件 → 该 socket 收到` 的正向链路。
+- **修复**：`DispatchContext`/`HandlerContext` 增加可选的 `session?: { id }`；
+  dispatcher 原样转发；gateway 在 dispatch 上下文中传入 `session`；`system.ts` 直接使用
+  `ctx.session`（去掉类型断言）。
+- **新增集成测试**（ws-gateway）：admin 订阅 `includeDomainEvents + types=['message.created']`
+  → 匹配事件只推给订阅 socket（1 个），未订阅 socket 收不到；不匹配类型仍被过滤。
+  修复前该测试红（`delivered=0`），修复后绿。
+- 文档：无决策变更（实现与 US-020 锁死语义一致，仅把断掉的接线接回）。
+
 ## 2026-11-27 — 修复配额竞态（事务内原子校验）
 
 测试基线：**608 → 611**（server 316 → 319）。schema v11 / RPC 26/26 / seq / 哈希 / 广播不变。

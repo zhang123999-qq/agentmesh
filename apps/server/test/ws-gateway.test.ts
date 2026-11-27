@@ -697,6 +697,62 @@ describe('ws live push', () => {
     await anonymous.close();
     await subscriber.client.close();
   });
+
+  it('system.subscribe opts one socket into matching domain-only pushes', async () => {
+    const harness = await startHarness({ ws: { livePush: true } });
+    const adminToken = await harness.app.tokens.sign({
+      agentId: 'agt_audit',
+      role: 'admin',
+      workspaceId: 'default',
+    });
+    const admin = await TestClient.open(harness.url, authHeader(adminToken));
+    await admin.waitFor((frame) => frame.type === 'welcome');
+    const plain = await registerAgent(harness, 'domain-plain');
+
+    const sub = await admin.request(
+      METHODS.system.subscribe,
+      { includeDomainEvents: true, types: ['message.created'] },
+      'sub',
+    );
+    expect(sub.error).toBeUndefined();
+    expect(sub.result).toMatchObject({
+      subscribed: true,
+      includeDomainEvents: true,
+      types: ['message.created'],
+    });
+
+    // The subscribed socket receives a matching domain-only event (live push
+    // fires from the append itself)…
+    const matching = harness.events.append({
+      aggregateId: 'ch_live',
+      type: 'message.created',
+      version: 3,
+      payload: { messageId: 'msg_domain_1', channelId: 'ch_live', seq: 1 },
+    });
+    await admin.waitFor((frame) => frame.params?.seq === matching.seq, {
+      label: 'subscribed domain push',
+    });
+    await delay(100);
+    // …but an unsubscribed socket on the same connection does not.
+    expect(
+      plain.client.framesOf((frame) => frame.params?.seq === matching.seq),
+    ).toHaveLength(0);
+
+    // The `types` filter still applies to the domain stream.
+    const filtered = harness.events.append({
+      aggregateId: 'ch_live',
+      type: 'task.bid.placed',
+      version: 4,
+      payload: { taskId: 'tsk_filtered', agentId: 'agt_audit' },
+    });
+    await delay(150);
+    expect(
+      admin.framesOf((frame) => frame.params?.seq === filtered.seq),
+    ).toHaveLength(0);
+
+    await admin.close();
+    await plain.client.close();
+  });
 });
 
 // ---------------------------------------------------------------------------

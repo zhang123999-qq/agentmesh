@@ -13,7 +13,6 @@ import { METHODS } from '@agentmesh/protocol';
 import type { HandlerRegistry } from '../registry.js';
 import { WORKSPACE_ADMIN_ROLES, requireRole } from '../auth/roles.js';
 import type { WsGateway } from '../ws/gateway.js';
-import type { WsSession } from '../ws/session.js';
 
 export interface SystemModuleOptions {
   /** Gateway for per-session subscription state. */
@@ -56,7 +55,7 @@ export function registerSystemModule(
         : undefined;
 
       // Mark this session's subscription in the gateway.
-      const session = (ctx as { session?: WsSession }).session;
+      const session = ctx.session;
       if (session !== undefined) {
         gateway.setSessionSubscription(session.id, {
           includeDomainEvents,
