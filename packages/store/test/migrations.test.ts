@@ -47,8 +47,9 @@ describe('migrations', () => {
       'task_completed_at',
       'multi_tenant_schema',
       'workspace_lifecycle',
+      'revoked_tokens',
     ]);
-    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(applied.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
   it('is idempotent: a second run applies nothing and does not throw', () => {
@@ -56,7 +57,7 @@ describe('migrations', () => {
     const second = runMigrations(db);
     expect(second.applied).toEqual([]);
     expect(second.version).toBe(CURRENT_SCHEMA_VERSION);
-    expect(listAppliedMigrations(db)).toHaveLength(10);
+    expect(listAppliedMigrations(db)).toHaveLength(11);
 
     // Third run on the same handle: still fine.
     expect(() => runMigrations(db)).not.toThrow();
@@ -68,7 +69,7 @@ describe('migrations', () => {
     db.exec('DELETE FROM schema_version');
     expect(getSchemaVersion(db)).toBe(0);
     const result = runMigrations(db);
-    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(result.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(getSchemaVersion(db)).toBe(CURRENT_SCHEMA_VERSION);
   });
 
@@ -111,9 +112,9 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8, 9, 10], version: 10 });
-    expect(getSchemaVersion(db)).toBe(10);
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(result).toEqual({ applied: [3, 4, 5, 6, 7, 8, 9, 10, 11], version: 11 });
+    expect(getSchemaVersion(db)).toBe(11);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
 
     // messages is untouched by v3-v9, so its table definition is byte-identical.
     const schemaAfter = db
@@ -284,7 +285,7 @@ describe('migrations', () => {
     expect(columnsOf(db, 'accounts').filter((c) => c.name === 'secret_hash')).toHaveLength(1);
 
     // A manual body re-run must not corrupt the ledger.
-    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(listAppliedMigrations(db).map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(runMigrations(db).applied).toEqual([]);
   });
 
@@ -317,8 +318,8 @@ describe('migrations', () => {
 
     const result = runMigrations(db);
 
-    expect(result).toEqual({ applied: [4, 5, 6, 7, 8, 9, 10], version: 10 });
-    expect(getSchemaVersion(db)).toBe(10);
+    expect(result).toEqual({ applied: [4, 5, 6, 7, 8, 9, 10, 11], version: 11 });
+    expect(getSchemaVersion(db)).toBe(11);
     expect(columnsOf(db, 'accounts').map((c) => c.name)).toContain('secret_hash');
 
     const row = db
@@ -390,7 +391,7 @@ describe('v9 multi-tenant schema (US-022)', () => {
     ).run();
 
     const result = runMigrations(db);
-    expect(result).toEqual({ applied: [9, 10], version: 10 });
+    expect(result).toEqual({ applied: [9, 10, 11], version: 11 });
 
     const row = db
       .prepare('SELECT workspace_id, joined_at FROM channel_members WHERE channel_id = ?')
@@ -431,5 +432,40 @@ describe('v10 workspace lifecycle (US-025)', () => {
     expect(repos.workspaces.get('ws-x')?.disabledAt).not.toBeNull();
     // `default` cannot be disabled.
     expect(repos.workspaces.disable('default')).toBe(false);
+  });
+});
+
+describe('v11 revoked_tokens (US-021D follow-up)', () => {
+  it('DAO: insert / isRevoked / countActive / loadUnexpired / deleteExpired', () => {
+    const { db } = makeStore();
+    const repos = createRepositories(db);
+    const now = 1_000_000;
+    repos.revokedTokens.insert({ jti: 'j1', expiresAt: now + 100, revokedAt: now, workspaceId: 'ws-a' });
+    repos.revokedTokens.insert({ jti: 'j2', expiresAt: now - 1 });
+    expect(repos.revokedTokens.isRevoked('j1', now)).toBe(true);
+    expect(repos.revokedTokens.isRevoked('j2', now)).toBe(false);
+    expect(repos.revokedTokens.countActive(now)).toBe(1);
+    expect(repos.revokedTokens.loadUnexpired(now).map((r) => r.jti)).toEqual(['j1']);
+    expect(repos.revokedTokens.deleteExpired(now)).toBe(1);
+    expect(repos.revokedTokens.countActive(now)).toBe(1);
+  });
+
+  it('migrates a v10 database to v11 (revoked_tokens created)', () => {
+    const db = openDatabase(':memory:');
+    db.exec(
+      `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);`,
+    );
+    const record = db.prepare(
+      'INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)',
+    );
+    for (const migration of MIGRATIONS.filter((m) => m.version <= 10)) {
+      db.transaction(() => {
+        migration.up(db);
+        record.run(migration.version, migration.name, 1);
+      })();
+    }
+    const result = runMigrations(db);
+    expect(result).toEqual({ applied: [11], version: 11 });
+    expect(tableNames(db)).toContain('revoked_tokens');
   });
 });

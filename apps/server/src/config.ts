@@ -109,6 +109,8 @@ export const DEFAULT_TASK_BID_COMPACTION_INTERVAL_SECONDS = 0;
 export const DEFAULT_HASH_CHAIN_VERIFY_ON_STARTUP = true;
 /** Expose the Prometheus `/metrics` endpoint. Default: on (restrict via network). */
 export const DEFAULT_METRICS_ENABLED = true;
+/** Revoked-token cleanup interval (seconds); 0 disables the timer. */
+export const DEFAULT_REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS = 3600;
 /** Periodic hash-chain verification interval (seconds); 0 disables the timer. */
 export const DEFAULT_HASH_CHAIN_VERIFY_INTERVAL_SECONDS = 3600;
 
@@ -189,6 +191,8 @@ export interface ServerConfig {
   readonly hashChainVerifyIntervalSeconds: number;
   /** Expose the Prometheus `/metrics` endpoint (default true). */
   readonly metricsEnabled: boolean;
+  /** Revoked-token cleanup interval (seconds); 0 disables the timer. */
+  readonly revokedTokensCleanupIntervalSeconds: number;
   /** `development` | `test` | `production` | anything the deployer sets. */
   readonly nodeEnv: string;
   readonly isProduction: boolean;
@@ -549,6 +553,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       env.METRICS_ENABLED,
       'METRICS_ENABLED',
       DEFAULT_METRICS_ENABLED,
+    ),
+    revokedTokensCleanupIntervalSeconds: parseNonNegativeInt(
+      env.REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS,
+      'REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS',
+      DEFAULT_REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS,
+      86_400, // max 24 hours
     ),
     nodeEnv,
     isProduction,

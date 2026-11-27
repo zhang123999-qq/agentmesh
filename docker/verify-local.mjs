@@ -32,6 +32,8 @@ const result = {
   compactionTimerCleared: false,
   hashChainTimerStarted: false,
   hashChainTimerCleared: false,
+  revokedCleanupStarted: false,
+  revokedCleanupCleared: false,
 };
 /**
  * Captured child stdout+stderr. The compaction and hash-chain timer
@@ -51,7 +53,7 @@ const migrateTwice = (path) => {
   const second = runNode(['apps/server/dist/cli/migrate.js', '--db', path]);
   if (second.status !== 0) throw new Error(`migrate failed: ${second.stderr}`);
   const secondJson = JSON.parse(second.stdout.trim());
-  return secondJson.applied.length === 0 &&  secondJson.version === 10;
+  return secondJson.applied.length === 0 &&  secondJson.version === 11;
 };
 
 let child;
@@ -61,7 +63,7 @@ try {
   const freshSecond = runNode(['apps/server/dist/cli/migrate.js', '--db', freshDb]);
   const freshJson = JSON.parse(freshSecond.stdout.trim());
   result.migrate =
-    freshJson.applied.length === 0 && freshJson.version === 10 && migrateTwice(dbPath);
+    freshJson.applied.length === 0 && freshJson.version === 11 && migrateTwice(dbPath);
 
   child = spawn(process.execPath, ['apps/server/dist/index.js'], {
     cwd: root,
@@ -166,6 +168,22 @@ try {
     if (result.hashChainTimerCleared !== true) {
       throw new Error(
         'hash-chain timer was not cleared on SIGTERM (no hashchain.timer.cleared log)',
+      );
+    }
+  }
+
+  // US-021D follow-up: revoked-token cleanup timer lifecycle (default 1h).
+  result.revokedCleanupStarted = serverLogs.includes('revoked.tokens.cleanup.started');
+  if (!result.revokedCleanupStarted) {
+    throw new Error('revoked-token cleanup timer never started (no revoked.tokens.cleanup.started log)');
+  }
+  if (process.platform === 'win32') {
+    result.revokedCleanupCleared = 'n/a';
+  } else {
+    result.revokedCleanupCleared = serverLogs.includes('revoked.tokens.cleanup.cleared');
+    if (result.revokedCleanupCleared !== true) {
+      throw new Error(
+        'revoked-token cleanup timer was not cleared on SIGTERM (no revoked.tokens.cleanup.cleared log)',
       );
     }
   }

@@ -788,3 +788,30 @@ dispatcher 记录 rpc 计数与耗时直方图；`/metrics` 路由在渲染时�
 **测试 +5（server 303→308，共 598）**：empty/memory 跳过；no-pending 跳过；非空 pending 生成快照且
 integrity ok；备份失败抛错且不留半成品；migrate CLI 在 pending 非空库上先备份再迁移。
 **故障注入**：让 helper 恒返回 no-pending（跳过备份）→ 快照/失败/CLI 三条测试红，恢复绿。
+
+## 撤销持久化 v11（6 个决策）
+
+1. **存储结构**：`revoked_tokens(jti TEXT PRIMARY KEY, expires_at INTEGER NOT NULL, revoked_at INTEGER NOT NULL, workspace_id TEXT NOT NULL DEFAULT 'default')`。
+   `jti` **全局唯一**（由签发端 crypto 保证）作 PK；`workspace_id` 仅用于跨租户校验；索引 `expires_at`（清理）与 `workspace_id`。
+2. **查询路径**：**内存 LRU 缓存 + DB 为真源**。`isRevoked` 先查缓存，未命中回退 DB 并回填缓存，
+   因此 **LRU 淘汰永不“解除撤销”**；`revoke` **先写 DB 再写缓存**（DB 失败则视为撤销失败，避免半应用）；
+   `loadFromStore` 在 **migrate 之后、listen 之前**预热。**启动加载失败 → 阻断启动**（与哈希链失败
+   不阻断不同：哈希链失败是审计信号可降级，撤销表失败是安全信号不可降级）。
+3. **清理**：定时删除过期行，env `REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS`（默认 **3600**，0 关闭），
+   与 hashChain 一致；`unref` + `onClose` 清理 + `revoked.tokens.cleanup.started/.cleared` 结构化日志，
+   `verify:docker` 显式断言；新增低基数 gauge `agentmesh_revoked_tokens_active`（/metrics）。
+   （`cleaned_total` counter 暂以 active gauge 体现，理由：自研 registry 按次自增，批量删除用 gauge 更直观。）
+4. **与轮换**：轮换 `JWT_SECRET` 仍是全量失效；撤销记录保留至 `exp`（轮换不影响其语义）。
+5. **与 US-025**：`agent.revokeToken` 校验目标 token 的 workspace == 调用者（跨租户 -32002），并把
+   `workspace_id` 落表；`workspace.disable` 后既有撤销记录保留到 `exp`（disable 只拒新登录）。
+6. **迁移**：**v11**，前向不可逆，单事务；**复用** `prepareMigrationBackup`（migrate CLI + startServer 两条路径），
+   不另写备份；已验证 v10 非空库 → 迁移前 backup（reason 'backed-up'）→ v11（revoked_tokens 存在）。
+
+**实现**：`RevokedTokensDao`（insert/isRevoked/deleteExpired/countActive/loadUnexpired）；
+`TokenRevocationRegistry` 增加 `store/logger`，`isRevoked` 缓存→DB 回退、`revoke` 先 DB 后缓存、
+`loadFromStore`、`cleanup`、`startCleanupTimer/stopCleanupTimer/isCleanupRunning/activeCount`；
+`app.ts` 注入 `repos.revokedTokens` + 启动预热 + 清理定时器 + `/metrics` gauge；v11 迁移建表。
+**测试 +8（server 308→316，store 76→78，共 608）**：DB 路径撤销拒绝；**重启后仍撤销**（核心 AC）；
+LRU 淘汰回退 DB；清理删除过期 + active 计数；清理定时器生命周期；启动加载失败抛错（阻断）；
+v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gauge。
+**故障注入**：停用持久化（revoke 不写 DB）→ DB/重启/LRU/清理 4 条测试红，恢复绿。

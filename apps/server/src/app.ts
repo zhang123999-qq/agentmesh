@@ -185,7 +185,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   // In-memory token revocation registry (US-021D); shared by the token service
   // (enforcement inside verify) and the `agent.revokeToken` handler.
-  const revocations = new TokenRevocationRegistry();
+  const revocations = new TokenRevocationRegistry({
+    store: options.store?.repos.revokedTokens,
+    logger,
+  });
+  // Warm the revocation cache from the persistent table (after migrate, before
+  // listen). A corrupt/unreadable table throws here: revocation is a security
+  // signal, so failing startup is safer than silently accepting revoked tokens.
+  revocations.loadFromStore();
 
   const tokens =
     options.tokens ??
@@ -426,6 +433,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     app.decorate('hashChain', hashChain);
   }
 
+  // Revoked-token cleanup timer (US-021D follow-up). Only when a store is wired
+  // (persistence lives there); default on (1h), 0 disables.
+  if (store !== undefined && config.revokedTokensCleanupIntervalSeconds > 0) {
+    revocations.startCleanupTimer(config.revokedTokensCleanupIntervalSeconds * 1000);
+    app.addHook('onClose', async () => {
+      revocations.stopCleanupTimer();
+    });
+  }
+
   const uptime = options.uptime ?? defaultUptime;
 
   app.get('/health', async (_request, reply) => {
@@ -478,6 +494,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         'Disabled tenants',
       );
     }
+    metrics.setGauge(
+      'agentmesh_revoked_tokens_active',
+      app.revocations.activeCount(),
+      {},
+      'Active (unexpired) revoked tokens',
+    );
     return metrics.render();
   });
 

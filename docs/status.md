@@ -28,10 +28,11 @@
 | US-023 | **完成（本地验证）** | RPC 按 token 作用域：channels create/join/leave/send 补 ctx.workspaceId；跨租户读 -32004 / 撤销 -32002；system.subscribe admin-only |
 | US-024 | **完成（本地验证）** | presence 按 workspace 分片：`#connections` 分片、online/offline 广播按 workspace 过滤；Web events 流天然只收本租户 |
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
+| US-021D-followup | **完成（本地验证）** | 撤销持久化 v11：`revoked_tokens` 表 + LRU 缓存 + 启动预热（失败阻断）+ 清理定时器 + `/metrics` gauge；重启后仍失效 |
 
-测试基线：**598**
-（core 55 / protocol 109 / store **76** / sdk 9 / adapters 7 / mock-agents 1 / server **308** / cli 22 / **web 11**）。
-schema 版本：**v10**。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本。
+测试基线：**608**
+（core 55 / protocol 109 / store **78** / sdk 9 / adapters 7 / mock-agents 1 / server **316** / cli 22 / **web 11**）。
+schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷
@@ -210,7 +211,7 @@ US-018 的关键语义：
 | `system.subscribe` | **US-020 完成** | admin opt-in domain-only 事件；现有 notification 广播不变；Web 默认只用 SDK `on()` |
 | 多租户：schema v10 + RPC 作用域 + presence 分片 + 租户生命周期已完成（US-022/023/024/025）——**多租户闭环** | — | 剩余为运维硬化（配额监控、租户级备份）与对外 SaaS 项（撤销持久化/静态加密/单实例边界） |
 | 哈希链无外部锚定（US-021C 已可定期校验） | US-022+ | 链尾篡改不可检测；运行时已能告警 mismatch |
-| token 撤销无持久化（US-021D 完成，仅进程内） | **已决策：保持进程内（2026-11-23）** | 重启后已撤销 token 在 `exp` 前复活；复审条件（多实例/合规/多租户）见 decisions.md |
+| token 撤销已持久化（v11，US-021D follow-up） | **完成** | revoked_tokens 表 + LRU 缓存 + 启动预热 + 清理定时器；重启后仍失效 |
 | SQLite 明文（US-021F 复核：仍不做，复审条件已记） | US-022+ | 依赖 OS/卷加密；触发条件见 decisions.md |
 | CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |
 

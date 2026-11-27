@@ -1,43 +1,61 @@
 /**
- * In-memory token revocation registry (US-021D).
+ * Token revocation registry (US-021D / US-021D follow-up v11).
  *
- * Stores revoked `jti`s until their `exp` (epoch seconds), bounded by an LRU
- * cap. Single-process only: a restart forgets revocations, so a token revoked
- * before a restart is valid again until `exp` (documented in operations.md and
- * security.md; JWT_SECRET rotation remains the whole-set invalidation tool).
+ * The in-memory LRU is a **cache** over the persistent `revoked_tokens` table:
+ *  - `isRevoked` checks memory first, then falls back to the DB (so an LRU
+ *    eviction can never un-revoke a token);
+ *  - `revoke` writes the DB row first (persistence is the source of truth) and
+ *    then the cache;
+ *  - `loadFromStore` warms the cache on startup (after migrate, before listen);
+ *  - `cleanup` deletes expired rows on a timer.
  *
- * Eviction policy when full: evict the least-recently-used jti — we never
- * reject a revoke, because honouring the latest revoke is the security-relevant
- * behaviour. `prune()`/`isRevoked()` lazily drop expired entries so the map does
- * not grow with dead jtis.
+ * Without a store (embedded/transport-only builds and unit tests) the registry
+ * degrades to the original in-memory behavior.
  */
+import type { RevokedTokensDao } from '@agentmesh/store';
+import type { Logger } from 'pino';
+
 export interface TokenRevocationOptions {
-  /** Maximum remembered jtis (LRU). Default 10,000. */
+  /** Maximum cached jtis (LRU). Default 10,000. */
   readonly maxEntries?: number;
   /** Injectable clock (epoch ms) for deterministic tests. */
   readonly clock?: () => number;
+  /** Persistent store; absent ⇒ memory-only. */
+  readonly store?: RevokedTokensDao;
+  readonly logger?: Logger;
 }
 
 export class TokenRevocationRegistry {
-  /** jti -> expiry (epoch seconds). Map insertion order is the LRU order. */
+  /** jti -> expiry (epoch seconds). Insertion order is the LRU order. */
   readonly #expByJti = new Map<string, number>();
   readonly #maxEntries: number;
   readonly #clock: () => number;
+  readonly #store?: RevokedTokensDao;
+  readonly #logger?: Logger;
+  #timer?: NodeJS.Timeout;
+  #cleanedTotal = 0;
 
   constructor(options: TokenRevocationOptions = {}) {
     this.#maxEntries = Math.max(1, options.maxEntries ?? 10_000);
     this.#clock = options.clock ?? (() => Date.now());
+    this.#store = options.store;
+    this.#logger = options.logger;
   }
 
   get size(): number {
     return this.#expByJti.size;
   }
 
+  /** Total expired rows removed by cleanup (diagnostics / metrics). */
+  get cleanedTotal(): number {
+    return this.#cleanedTotal;
+  }
+
   #nowSeconds(): number {
     return Math.floor(this.#clock() / 1000);
   }
 
-  /** Drop every entry whose expiry is at or before now. */
+  /** Drop expired entries from the in-memory cache only. */
   prune(): void {
     const now = this.#nowSeconds();
     for (const [jti, exp] of this.#expByJti) {
@@ -45,31 +63,103 @@ export class TokenRevocationRegistry {
     }
   }
 
-  /** True when `jti` is revoked and not yet expired. Refreshes LRU recency. */
-  isRevoked(jti: string | undefined): boolean {
-    if (jti === undefined) return false;
-    const exp = this.#expByJti.get(jti);
-    if (exp === undefined) return false;
-    if (exp <= this.#nowSeconds()) {
-      this.#expByJti.delete(jti);
-      return false;
-    }
-    // Refresh recency: delete + re-insert moves it to the "newest" end.
-    this.#expByJti.delete(jti);
-    this.#expByJti.set(jti, exp);
-    return true;
-  }
-
-  /** Revoke `jti` until `expiresAt` (epoch seconds). Never rejects. */
-  revoke(jti: string, expiresAt: number): void {
-    this.prune();
+  #remember(jti: string, exp: number): void {
     if (!this.#expByJti.has(jti) && this.#expByJti.size >= this.#maxEntries) {
-      // Evict the least-recently-used entry (Map preserves insertion order).
       const oldest = this.#expByJti.keys().next().value;
       if (oldest !== undefined) this.#expByJti.delete(oldest);
     }
-    // Delete + re-insert to mark this jti as most-recently-used.
     this.#expByJti.delete(jti);
-    this.#expByJti.set(jti, expiresAt);
+    this.#expByJti.set(jti, exp);
+  }
+
+  /**
+   * True when `jti` is revoked and not yet expired. Checks the cache, then the
+   * persistent store (caching a hit). An LRU eviction never un-revokes a token.
+   */
+  isRevoked(jti: string | undefined): boolean {
+    if (jti === undefined) return false;
+    const now = this.#nowSeconds();
+    const cached = this.#expByJti.get(jti);
+    if (cached !== undefined) {
+      if (cached <= now) {
+        this.#expByJti.delete(jti);
+        return false;
+      }
+      this.#expByJti.delete(jti);
+      this.#expByJti.set(jti, cached);
+      return true;
+    }
+    if (this.#store?.isRevoked(jti, now) === true) {
+      // Cache with the store's expiry (re-read so the cache entry is accurate).
+      const rows = this.#store.loadUnexpired(now);
+      const hit = rows.find((row) => row.jti === jti);
+      if (hit !== undefined) this.#remember(jti, hit.expiresAt);
+      return true;
+    }
+    return false;
+  }
+
+  /** Revoke `jti` until `expiresAt` (epoch seconds). Persists, then caches. */
+  revoke(jti: string, expiresAt: number, workspaceId?: string): void {
+    // Persistence first: if the DB write fails the token must NOT appear revoked
+    // (a half-applied revoke would silently accept a token on the next restart).
+    this.#store?.insert({
+      jti,
+      expiresAt,
+      revokedAt: this.#nowSeconds(),
+      ...(workspaceId === undefined ? {} : { workspaceId }),
+    });
+    this.#remember(jti, expiresAt);
+  }
+
+  /** Warm the cache from the store (startup: after migrate, before listen). */
+  loadFromStore(): void {
+    if (this.#store === undefined) return;
+    const rows = this.#store.loadUnexpired(this.#nowSeconds());
+    this.#expByJti.clear();
+    for (const row of rows) this.#remember(row.jti, row.expiresAt);
+  }
+
+  /** Delete expired rows from the store (and prune the cache). Returns count. */
+  cleanup(): number {
+    this.prune();
+    if (this.#store === undefined) return 0;
+    const removed = this.#store.deleteExpired(this.#nowSeconds());
+    this.#cleanedTotal += removed;
+    return removed;
+  }
+
+  /** Active (unexpired) revocation count, for the /metrics gauge. */
+  activeCount(): number {
+    return this.#store !== undefined ? this.#store.countActive(this.#nowSeconds()) : this.#expByJti.size;
+  }
+
+  startCleanupTimer(intervalMs: number): void {
+    if (this.#timer !== undefined || intervalMs <= 0) return;
+    const timer = setInterval(() => {
+      try {
+        this.cleanup();
+      } catch (err) {
+        this.#logger?.error?.({
+          err: err instanceof Error ? err.message : String(err),
+          msg: 'revoked.tokens.cleanup.failed',
+        });
+      }
+    }, intervalMs);
+    timer.unref?.();
+    this.#timer = timer;
+    this.#logger?.info?.({ intervalMs, msg: 'revoked.tokens.cleanup.started' });
+  }
+
+  stopCleanupTimer(): void {
+    if (this.#timer !== undefined) {
+      clearInterval(this.#timer);
+      this.#timer = undefined;
+      this.#logger?.info?.({ msg: 'revoked.tokens.cleanup.cleared' });
+    }
+  }
+
+  isCleanupRunning(): boolean {
+    return this.#timer !== undefined;
   }
 }

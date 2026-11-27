@@ -333,6 +333,25 @@ function channelMembersPkIncludesWorkspace(db: AgentMeshDatabase): boolean {
   return workspace !== undefined && workspace.pk > 0;
 }
 
+/**
+ * v11 — persistent token revocations (US-021D follow-up).
+ *
+ * `jti` is globally unique (issued per token via crypto), so it is the primary
+ * key; `workspace_id` is stored only so cross-tenant revoke checks can be
+ * enforced. `expires_at` drives cleanup; expired rows are deleted by a timer.
+ */
+const REVOKED_TOKENS_SQL = `
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  jti          TEXT PRIMARY KEY,
+  expires_at   INTEGER NOT NULL,
+  revoked_at   INTEGER NOT NULL,
+  workspace_id TEXT NOT NULL DEFAULT '${DEFAULT_WORKSPACE_ID}'
+);
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_workspace ON revoked_tokens(workspace_id);
+`;
+
+
 
 export const MIGRATIONS: readonly Migration[] = [
   {
@@ -434,6 +453,14 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE UNIQUE INDEX IF NOT EXISTS uq_workspaces_invite_code
            ON workspaces(invite_code) WHERE invite_code IS NOT NULL;`,
       );
+    },
+  },
+  {
+    version: 11,
+    name: 'revoked_tokens',
+    up: (db) => {
+      // US-021D follow-up: persist token revocations so they survive restarts.
+      db.exec(REVOKED_TOKENS_SQL);
     },
   },
 ];

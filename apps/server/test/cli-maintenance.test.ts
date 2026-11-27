@@ -9,7 +9,7 @@ import { runBackup } from '../src/cli/backup.js';
 import { runMigrate } from '../src/cli/migrate.js';
 
 describe('maintenance CLIs', () => {
-  it('migrates a database idempotently and reports v10', () => {
+  it('migrates a database idempotently and reports v11', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agentmesh-migrate-'));
     const dbPath = join(dir, 'agentmesh.db');
     try {
@@ -25,7 +25,7 @@ describe('maintenance CLIs', () => {
         version: number;
         targetVersion: number;
       };
-      expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+      expect(first.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
       expect(first.version).toBe(CURRENT_SCHEMA_VERSION);
       expect(first.targetVersion).toBe(CURRENT_SCHEMA_VERSION);
 

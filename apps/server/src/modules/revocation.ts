@@ -62,7 +62,7 @@ export function registerRevocationModule(
         );
       }
 
-      options.revocations.revoke(jti, expiresAt);
+      options.revocations.revoke(jti, expiresAt, verified.workspaceId);
       // Log jti + agentId (jti is a random opaque id, safe to log); never the token.
       options.logger?.info?.({
         agentId: verified.agentId,

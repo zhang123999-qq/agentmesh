@@ -2,6 +2,23 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 撤销持久化 v11（US-021D follow-up）
+
+测试基线：**608**（store 76 → 78，server 308 → 316）。schema **v10 → v11**。RPC 26/26 不变。
+
+- v11 迁移：`revoked_tokens(jti PK, expires_at, revoked_at, workspace_id)` + `expires_at`/`workspace_id` 索引。
+- `RevokedTokensDao`（insert/isRevoked/deleteExpired/countActive/loadUnexpired）；
+  `TokenRevocationRegistry` 改为 **内存 LRU 缓存 + DB 真源**：`isRevoked` 缓存未命中回退 DB（LRU 淘汰不解除撤销），
+  `revoke` 先写 DB 再写缓存，`loadFromStore` 在 migrate 后 / listen 前预热（**失败阻断启动**）。
+- 清理定时器：`REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS`（默认 3600，0 关闭），SIGTERM 清理，
+  `revoked.tokens.cleanup.started/.cleared` 日志 + `verify:docker` 断言；`/metrics` 新增 `agentmesh_revoked_tokens_active`。
+- 跨租户撤销仍 -32002 且落 `workspace_id`；`workspace.disable` 后撤销记录保留到 `exp`。
+- 迁移前备份复用 `prepareMigrationBackup`（v10 非空库 → backup → v11 已测）。
+- 测试（+8）：DB 路径撤销拒绝；**重启后仍撤销**；LRU 回退 DB；清理删除过期 + active 计数；
+  清理定时器生命周期；启动加载失败抛错（阻断）；v10→v11 备份+建表；config 接线 + `/metrics` gauge。
+  故障注入：停用持久化 → 4 条红，恢复绿。
+- 文档：decisions（6）、security（持久化语义）、operations（撤销表运维）。
+
 ## 2026-11-26 — 备份与恢复制度化
 
 测试基线：**598**（server 303 → 308）。schema v10 / RPC 26/26 不变。

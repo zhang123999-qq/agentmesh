@@ -224,3 +224,12 @@ curl -kf https://localhost:8443/health
   | 2026-11-26 | Windows 本机 | 新建迁移库 | **PASS** | health ok / hashChain ok / metrics ok |
 - **备份安全**：`secret_hash` 是摘要（非明文 secret）；备份仍为明文 SQLite，继承 OS/卷加密；
   **不要把备份提交进仓库**。
+
+## token 撤销表运维（v11）
+
+- 表 `revoked_tokens(jti, expires_at, revoked_at, workspace_id)`；撤销经 `agent.revokeToken` 落库，重启后仍生效。
+- **清理**：`REVOKED_TOKENS_CLEANUP_INTERVAL_SECONDS`（默认 3600，0 关闭）定时删除过期行；
+  结构化日志 `revoked.tokens.cleanup.started/.cleared`；`verify:docker` 断言。
+- **指标**：`GET /metrics` 的 `agentmesh_revoked_tokens_active`（当前未过期撤销数）。
+- **备份/恢复**：撤销表随库备份；恢复演练 `scripts/restore-drill.sh` 覆盖（恢复后旧 token 仍 -32001）。
+- 跨租户撤销：调用者 workspace 必须等于目标 token 的 workspace，否则 -32002。
