@@ -524,13 +524,6 @@ export class AccountsService {
       if (ws.disabledAt !== null) {
         throw new ProtocolError(JsonRpcErrorCode.Forbidden, 'workspace is disabled');
       }
-      if (this.#accounts.count(workspaceId) >= ws.maxAgents) {
-        throw new ProtocolError(
-          JsonRpcErrorCode.QuotaExceeded,
-          'workspace agent quota exceeded',
-          { maxAgents: ws.maxAgents },
-        );
-      }
     }
     // DB truth: `accounts.name` is UNIQUE across the table, so judge
     // duplicates the same way instead of per (name, workspaceId).
@@ -555,6 +548,26 @@ export class AccountsService {
 
     try {
       withTransaction(this.#db, () => {
+        // Quota enforcement runs **inside** the IMMEDIATE transaction: the
+        // count read and the INSERT must be atomic. A pre-transaction check
+        // has a race window where another writer (another instance, or a
+        // second connection) inserts between the check and this INSERT,
+        // exceeding `maxAgents`. `withTransaction` takes the write lock before
+        // the callback, so re-reading the tenant here serializes the check
+        // with every competing registration.
+        if (options.viaInvite === true && this.#workspaces !== undefined) {
+          const current = this.#workspaces.get(workspaceId);
+          if (current === undefined) {
+            throw new ProtocolError(JsonRpcErrorCode.NotFound, 'workspace not found');
+          }
+          if (this.#accounts.count(workspaceId) >= current.maxAgents) {
+            throw new ProtocolError(
+              JsonRpcErrorCode.QuotaExceeded,
+              'workspace agent quota exceeded',
+              { maxAgents: current.maxAgents },
+            );
+          }
+        }
         this.#accounts.create({
           id,
           name,

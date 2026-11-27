@@ -2,6 +2,26 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 修复配额竞态（事务内原子校验）
+
+测试基线：**608 → 611**（server 316 → 319）。schema v11 / RPC 26/26 / seq / 哈希 / 广播不变。
+
+- `AccountsService.register`：`maxAgents` 检查从 `withTransaction` **外**移到事务内
+  （IMMEDIATE 回调里重新读取 workspace 并 `count`），与 `accounts.create` + `setSecretHash` +
+  `account.registered` 事件同事务。超限仍返回 **-32008**（`data.maxAgents`），抛错整体回滚，
+  不会留下半写入账号/事件。
+- 新增 `apps/server/test/quota-race.test.ts`（3 条）：
+  1) 顺序超限拒绝并保持 `count=maxAgents`；
+  2) `Promise.all` 5 个并发注册（`maxAgents=2`）→ 2 成功 / 3 个 `-32008`；
+  3) **双连接交错**（同库两个连接模拟两实例，B `busy_timeout=25ms`；A 在事务内 `count` 时
+     钩子触发 B 注册）→ B 拿不到写锁，最终总数 = 2。
+- 故障注入自检：把检查退回事务外并移除事务内检查 → 交错测试 **红**（expected 2, received 3），
+  另 2 条仍绿（它们只锁语义）；恢复后 3 条全绿。
+- 诚实边界：`Promise.all` 在单进程同步驱动下是串行的，**不能**证明跨连接原子性；竞态证明
+  必须依赖第二个连接的交错测试。`channel.*` 等其他 "先查后写" 路径未扩大范围，列为
+  B/C（多实例）前置复核项。
+- 文档：decisions（「配额竞态修复」3 决策 + 边界）、status（技术债标记已修复）。
+
 ## 2026-11-27 — CI 基线确认（run 45960323420）
 
 - 推送 `3d80e00..3328c29`（含恢复演练、静态加密决策、单实例边界、覆盖率度量）到 `origin/main`。

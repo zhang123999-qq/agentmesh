@@ -918,7 +918,7 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 | 9 | MetricsRegistry（counter/gauge/histogram） | `apps/server/src/metrics.ts`、`apps/server/src/app.ts:473-498` | 每实例独立 `/metrics`，需抓取全部实例并聚合（见第 5 节） |
 | 10 | 迁移前自动备份（`prepareMigrationBackup`） | `apps/server/src/index.ts:68`、`apps/server/src/cli/migrate.ts:58` | 多实例同时首启会并发快照/迁移；命名含秒级时间戳，**无文件锁** |
 | 11 | v11 撤销 LRU 缓存（DB 为真源） | `apps/server/src/auth/revocation.ts` | 缓存按实例各自 1 万；`isRevoked` 未命中回退 DB → **无假阴性**；撤销在 A 实例落库后 B 实例回退 DB 即正确；容量与一致性可接受 |
-| 12 | 邀请码 / 配额校验（DB 查询，无内存缓存） | `apps/server/src/modules/accounts.ts:527,877` | 无缓存同步问题；但**配额检查在写事务之外**（`:527` 检查，`:557` 才 `withTransaction`）——单进程内检查与插入之间无 await，安全；**多实例并发可超配额** |
+| 12 | 邀请码 / 配额校验（DB 查询，无内存缓存） | `apps/server/src/modules/accounts.ts`（register） | 无缓存同步问题。**配额竞态已于 2026-11-27 修复**：`count` 检查移入 `withTransaction`（IMMEDIATE）内，与 INSERT 原子；见文末「配额竞态修复」 |
 | 13 | WS 心跳定时器 | `apps/server/src/ws/gateway.ts:285` | 每实例独立，无冲突 |
 | 14 | SQLite 句柄与 `app.close()` | `apps/server/src/app.ts` / `index.ts` | 每实例独立，无冲突 |
 
@@ -986,8 +986,8 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - `maxAgents` 只是**数量**上限，不是速率上限；当前**没有每租户限流**——登记为技术债。
 - 建议对外 SaaS 前新增 per-tenant 速率限制（按 `workspaceId` 分桶的 LRU；**workspaceId 不进指标
   label**，保持低基数），单列故事。
-- 配额竞态（第 1 节 #12）：若未来采用 B/C，必须把 `count` 检查与 `accounts.create` 放进**同一写事务**，
-  或改用数据库约束/原子计数。
+- 配额竞态（第 1 节 #12）：**已修复（2026-11-27）**，见文末「配额竞态修复」。若未来采用 B/C，
+  仍需复核 `channel.*` 与其他 "先查后写" 路径的多实例语义（本次只修配额，未扩大范围）。
 
 ### 7. 实现边界
 
@@ -1070,4 +1070,40 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 `cli/migration-backup.ts` 96.66% / 78.94%、`modules/revocation.ts` 86.66% / 75%、
 `modules/workspace.ts` 87.5% / 71.42%、`modules/accounts.ts` 91.66% / 86.81%。
 即：US-021B / v11 / 备份制度化新增路径**不是**覆盖率盲区。
+
+## 配额竞态修复（2026-11-27，fix）
+
+> 背景：单实例边界决策（第 1 节 #12）发现 `accounts.count(workspaceId) >= maxAgents` 在
+> `withTransaction` **之外**，单进程无窗口，但多实例/多连接并发可超配额。
+
+### 3 个决策
+
+1. **策略 A：把配额检查移入 `withTransaction`（`db.transaction(fn).immediate()`）内**，
+   与 `accounts.create` + `setSecretHash` + 事件追加同事务。
+   理由：helper 已保证**回调执行前**取得写锁，因此 count 读与 INSERT 原子；单实例行为不变；
+   无需触发器或分布式锁。被否决：B（SQLite 触发器实现复杂、-32008 错误映射与可观测性差）；
+   C（当前单实例，分布式锁是纯成本）。
+2. **错误码保持 `-32008` QuotaExceeded**（US-025 锁定），`data.maxAgents` 保留；不静默截断、
+   不改错误语义。事务内抛错会整体回滚（无半写入账号/事件）。
+3. **并发测试构造**：
+   - 行为测试：`Promise.all` 同时发起 5 个注册（`maxAgents=2`），断言 2 成功、3 个 `-32008`。
+   - **竞态证明**：同一 SQLite 文件打开**两个连接**（模拟两个实例，B 的 `busy_timeout=25ms`），
+     在 A 的 `count`（事务内）钩子里触发 B 注册。修复后 B 拿不到写锁（SQLITE_BUSY），
+     A 提交后总数 = 2；若把检查退回事务外，B 先插入、A 再插入 → 总数 3，测试变红。
+   - **诚实边界**：单进程 `Promise.all` **不能**证明跨连接原子性（better-sqlite3 同步执行，
+     `Promise.all` 实际串行化）；因此竞态必须用第二个连接的交错测试证明，不能只报 Promise.all。
+
+### 故障注入自检
+
+- 注入：把 `count` 检查移回事务外并移除事务内检查 → `a second writer cannot interleave...`
+  **红**（expected 2, received 3），另 2 条仍绿；恢复后 3 条全绿。
+- 说明：交错测试对顺序敏感；`Promise.all` 行为测试对检查位置不敏感，这是预期的——
+  它锁的是配额**语义**，不是竞态窗口。
+
+### 影响与边界
+
+- 单实例：行为不变（原本也无 await 窗口）；schema 不变，RPC 26/26 不变，seq/哈希/广播不变。
+- 多实例：配额不再可超发；写冲突以 SQLite `SQLITE_BUSY` 暴露（当前 `busy_timeout=5000`）。
+  B/C 故事需定义 BUSY 的重试/错误映射策略。
+- 本次**只修配额**；`channel.*` 等其他 "先查后写" 路径未扩大审计范围，列为 B/C 前置复核项。
 
