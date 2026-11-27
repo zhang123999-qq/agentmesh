@@ -30,12 +30,12 @@
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
 | US-021D-followup | **完成（本地验证）** | 撤销持久化 v11：`revoked_tokens` 表 + LRU 缓存 + 启动预热（失败阻断）+ 清理定时器 + `/metrics` gauge；重启后仍失效 |
 
-测试基线：**611**
-（core 55 / protocol 109 / store **78** / sdk 9 / adapters 7 / mock-agents 1 / server **319** / cli 22 / **web 11**）。
+测试基线：**651**
+（core 55 / protocol 109 / store **78** / sdk **22** / adapters 7 / mock-agents 1 / server **341** / cli **27** / **web 11**）。
 schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本
 （**2026-11-27 生产库演练 PASS**：含租户/消息/任务/撤销表，恢复后及二次重启后撤销仍 -32001）。
-覆盖率（2026-11-27 首次度量，advisory，门槛未设）：**行 86.19%**（server 90.75 / store 91.39 /
-core 91.62 / protocol 94.32 / sdk 62.93 / adapters 72.72 / mock-agents 82.85 / cli 72.44 / web 95.45）。
+覆盖率（2026-11-27 补测后，advisory，门槛未设）：**行 87.84%**（server 92.02 / store 91.39 /
+core 91.62 / protocol 94.32 / sdk 74.12 / adapters 72.72 / mock-agents 82.85 / cli 74.33 / web 95.45）。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷
@@ -219,12 +219,9 @@ US-018 的关键语义：
 | 单实例边界（**已声明，2026-11-27**） | **决策完成** | 四定时器 / presence / WS 广播均在进程内；多实例会丢实时消息。容量估算与扩容决策树见 operations.md；高可用需方案 B/C（单列故事） |
 | 无每租户限流（`maxAgents` 只是数量上限） | 对外 SaaS 前 | 单实例下无资源隔离，租户突发会拖累全体；按 workspaceId 分桶的限流需单列故事（workspaceId 不进指标 label） |
 | 配额竞态（多实例可超配额） | **已修复（2026-11-27）** | 配额检查移入 `withTransaction`（IMMEDIATE）内；3 条测试（含双连接交错）+ 故障注入；单实例行为不变，见 decisions.md「配额竞态修复」 |
-| **覆盖率盲区**：`modules/system.ts` 行 72.72% / 分支 16.66% | 待定（建议 US-026+） | `system.subscribe` 的 admin 门禁与 `includeDomainEvents/types` 过滤分支几乎未测，存在 domain 事件过滤被绕过的风险；度量基线见 decisions.md「覆盖率度量」 |
-| **覆盖率盲区**：`ws/framing.ts` 行 68.57% / 分支 50.94% | 待定 | WS 帧解析与 1 MiB 上限错误路径未覆盖（畸形帧 / close code） |
-| **覆盖率盲区**：`sdk/errors.ts` 行 41.66% / 分支 25.00% | 待定 | SDK 错误映射（-32001…-32008 / gap_too_large / -32007）分支少，映射错误会误导所有 agent 客户端 |
-| **覆盖率盲区**：`cli/backup.ts` 行 76.00% / 分支 52.77% | 待定 | 备份 CLI 失败路径（integrity 失败、库缺失）未测；"失败当成功"是备份制度化核心风险 |
-| **覆盖率盲区**：`apps/cli/src/commands/workspace.ts` 0%、`sdk/transport.ts` 0%（14 行） | 待定 | US-025 CLI 薄封装未测；浏览器 transport 仅由 e2e/手工覆盖 |
-| 覆盖率门槛未设（当前 advisory） | 2026-12 中旬 | 连续两周 CI 基线稳定后按包设置"基线 −5pp"下限，再转 required |
+| **覆盖率盲区（6 个高风险文件）** | **已补齐（2026-11-27）** | transport 0→100、errors 41.66→100、framing 68.57→100、system 72.72→100、CLI workspace 0→100、backup 76→94；每文件均做故障注入自检。补测中发现 `system.subscribe` 接线未生效（独立 fix `450b4f6`） |
+| `system.subscribe` 订阅接线 | **已修复（2026-11-27）** | `ctx.session` 从未传递导致 domain 事件订阅不生效；dispatcher/gateway 已接通并补正向集成测试 |
+| 覆盖率门槛未设（当前 advisory） | 2026-12 中旬 | 连续两周 CI 基线稳定后按包设置"基线 −5pp"下限，再转 required；当前基线 87.84% |
 | CLI/Web 为空 | US-016/019 | 客户端工具与 Web 后台未落地 |
 
 ## 下一步

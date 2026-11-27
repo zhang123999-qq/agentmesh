@@ -2,6 +2,28 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 补齐高风险覆盖率盲区（6 个文件）
+
+测试基线：**611 → 651**（sdk 9 → 22、server 320 → 341、cli 22 → 27）。
+覆盖率（行）：**86.19% → 87.84%**（4227/4812）。只补测试，不改业务逻辑；seq / 哈希 / 广播 / RPC 26/26
+/ schema v11 不变。
+
+| 文件 | 行 / 分支（前 → 后） | 新增测试 |
+| --- | --- | --- |
+| `packages/sdk/src/transport.ts` | 0 / 0 → **100 / 100** | 3：无全局 WebSocket 报错、open/message/close/error 转发（含 1006 缺省与二进制 toString）、send/close 委托 |
+| `packages/sdk/src/errors.ts` | 41.66 / 25.00 → **100 / 100** | 10：-32001…-32007 全映射、未知码降级、retryAfterMs / CAS getter 类型守卫 |
+| `apps/server/src/ws/framing.ts` | 68.57 / 50.94 → **100 / 100** | 12：4 种输入解码、非法 JSON/不支持类型、control 判定、resume/ping、全部出站帧（含可选字段省略） |
+| `apps/server/src/modules/system.ts` | 72.72 / 16.66 → **100 / 100** | 4 单测 + 1 集成：默认值、types 过滤、非 WS 路径、角色门禁、订阅后 domain 事件只达订阅 socket |
+| `apps/cli/src/commands/workspace.ts` | 0 / 0 → **100 / 100** | 5：create（含 --max-agents 透传）/ list（DISABLED、空列表、JSON）/ disable、缺参 UsageError |
+| `apps/server/src/cli/backup.ts` | 76.00 / 52.77 → **94.00 / 80.55** | 6：--db/--out 两种形式、未知参数、缺值、同源目标、库缺失、非 SQLite 文件 |
+
+- **故障注入自检（逐文件）**：transport 缺省 close 码改 1005 → 红；errors 的 -32001 映射改 Forbidden → 红；
+  framing `buildPongFrame` 恒写 ts → 红；system 去掉 types 过滤 → 红；CLI 丢弃 maxAgents → 红；
+  backup catch 返回 0 → 4 条红。全部恢复后全绿。
+- **补测发现真实缺陷**：`system.subscribe` 的 `ctx.session` 从未传递，订阅实际不生效 →
+  独立 `fix:` 提交（见下一条），新增集成测试先红后绿。
+- 文档：decisions（「覆盖率盲区补测」包含前后数字与注入表）、status（技术债盲区行标记已补齐）。
+
 ## 2026-11-27 — 修复 `system.subscribe` 订阅从未生效（US-020 根因）
 
 测试基线：**611 → 612**（server 319 → 320）。schema / RPC 26/26 / seq / 哈希不变。

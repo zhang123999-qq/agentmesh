@@ -64,7 +64,7 @@ npm install                 # 根目录安装，workspaces 自动联动
 npm run build               # 全包构建（--workspaces --if-present）
 npm run typecheck           # 全包类型检查
 npm run lint                # 全包 ESLint
-npm test                    # 全包单元测试（vitest，当前 608 个，含 web 11）
+npm test                    # 全包单元测试（vitest，当前 651 个，含 web 11）
 npm run demo                # 起真实服务端 + 三 mock agent 的端到端演示
 npm run verify:docker       # 无 Docker 引擎时的本地部署等价验证
 npm run verify              # typecheck + lint + test（提交前统一校验）
@@ -147,7 +147,8 @@ BASE_URL=http://localhost:3000 ADMIN_AGENT_ID=agt_xxx ADMIN_SECRET=... \
 （如 `https://localhost:8443`）即可复用同一份脚本，无需另写 Playwright。
 
 MVP 不强制覆盖率数字；自 2026-11-27 起以 `npm run coverage` 度量（advisory，无门槛），
-基线 86.19% 行覆盖（按包见 [docs/status.md](docs/status.md)），低覆盖高风险清单同步登记在技术债表。
+基线 87.84% 行覆盖（按包见 [docs/status.md](docs/status.md)），高风险盲区已补测并登记在技术债表
+（2026-11-27 补测 6 个文件，含 transport / errors / framing / system / CLI workspace / backup）。
 `packages/core`、`packages/store` 与 `apps/web` 的核心逻辑必须有单测。
 
 ## 持续集成（CI）

@@ -1039,31 +1039,34 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - 本基线在 **Windows / Node v26.13.0** 测得；CI advisory job 跑 Node 22，数字应一致
   （行覆盖与平台无关，若不一致按 CI artifact 为准）。
 
-### 基线（2026-11-27，608 测试全绿）
+### 基线（2026-11-27，651 测试全绿）
 
 | 包 | 行 % | 分支 % | 函数 % | 语句 % |
 | --- | --- | --- | --- | --- |
-| server | 90.75 | 80.38 | 90.27 | 88.02 |
+| server | 92.02 | 82.71 | 91.62 | 89.51 |
 | store | 91.39 | 87.87 | 96.00 | 91.47 |
 | core | 91.62 | 81.26 | 91.66 | 89.48 |
 | protocol | 94.32 | 84.90 | 77.14 | 93.33 |
-| sdk | 62.93 | 55.26 | 51.04 | 60.29 |
+| sdk | 74.12 | 66.84 | 66.66 | 71.17 |
 | adapters | 72.72 | 52.00 | 64.70 | 69.44 |
 | mock-agents | 82.85 | 50.00 | 78.37 | 79.47 |
-| cli | 72.44 | 54.86 | 73.55 | 71.42 |
+| cli | 74.33 | 56.07 | 76.85 | 73.19 |
 | web | 95.45 | 81.81 | 83.33 | 95.65 |
-| **合计（行）** | **86.19**（4144/4808） | — | — | — |
+| **合计（行）** | **87.84**（4227/4812） | — | — | — |
 
-### 低覆盖高风险清单（归属见 status.md 技术债表）
+> 初测基线（86.19%）后补齐 6 个高风险文件（故事见文末「覆盖率盲区补测」），
+> 上表为补测后数字；括号内为初测值。
 
-| 模块 | 行 % | 分支 % | 为什么高风险 |
-| --- | --- | --- | --- |
-| `apps/server/src/modules/system.ts` | 72.72 | **16.66** | admin-only 门禁 + `includeDomainEvents/types` 过滤；分支几乎未测，存在"domain 事件过滤被绕过"风险 |
-| `apps/server/src/ws/framing.ts` | 68.57 | **50.94** | WS 帧解析与 1 MiB 上限错误路径；畸形帧/close code 未覆盖 |
-| `packages/sdk/src/errors.ts` | 41.66 | **25.00** | SDK 错误映射（-32001…-32008 / gap_too_large / -32007）；映射错误会误导所有 agent 客户端 |
-| `apps/server/src/cli/backup.ts` | 76.00 | **52.77** | 备份 CLI 失败路径（integrity 失败、库缺失）；"失败当成功"是备份制度化的核心风险 |
-| `apps/cli/src/commands/workspace.ts` | **0.00** | 0.00 | US-025 的 CLI 薄封装未测；平台 admin 的租户运维入口 |
-| `packages/sdk/src/transport.ts` | **0.00**（14 行） | 0.00 | 浏览器 transport 选择仅由 e2e/手工覆盖，Node 单测不覆盖 |
+### 低覆盖高风险清单（2026-11-27 补测后）
+
+| 模块 | 初测 → 补测后（行 / 分支） | 状态 |
+| --- | --- | --- |
+| `apps/server/src/modules/system.ts` | 72.72 / 16.66 → **100 / 100** | 已补测；并借此发现 `ctx.session` 断线（独立 fix） |
+| `apps/server/src/ws/framing.ts` | 68.57 / 50.94 → **100 / 100** | 已补测 |
+| `packages/sdk/src/errors.ts` | 41.66 / 25.00 → **100 / 100** | 已补测 |
+| `apps/server/src/cli/backup.ts` | 76.00 / 52.77 → **94.00 / 80.55**（函数 57.14） | 已补错误路径；`isMainModule` 分支不构造 |
+| `apps/cli/src/commands/workspace.ts` | 0.00 → **100 / 100** | 已补测 |
+| `packages/sdk/src/transport.ts` | 0.00 → **100 / 100** | 已补测（fake global WebSocket） |
 
 **已核实为"覆盖良好"的重点模块**（本故事特别要求检查的盲区）：
 `metrics.ts` 100% 行 / 94.28% 分支、`auth/revocation.ts` 94.82% / 74.35%、
@@ -1106,4 +1109,45 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - 多实例：配额不再可超发；写冲突以 SQLite `SQLITE_BUSY` 暴露（当前 `busy_timeout=5000`）。
   B/C 故事需定义 BUSY 的重试/错误映射策略。
 - 本次**只修配额**；`channel.*` 等其他 "先查后写" 路径未扩大审计范围，列为 B/C 前置复核项。
+
+## 覆盖率盲区补测（2026-11-27，test）
+
+> 只补测试，不改业务逻辑。新增测试全部经过故障注入自检（破坏实现 → 期望红 → 恢复）。
+> 测试基线 **611 → 651**（sdk 9 → 22，server 320 → 341，cli 22 → 27）。
+
+| 文件 | 初测（行/分支） | 补测后（行/分支） | 新增测试 |
+| --- | --- | --- | --- |
+| `packages/sdk/src/transport.ts` | 0 / 0 | **100 / 100** | 3（fake global WebSocket：无构造器、事件转发、send/close 委托） |
+| `packages/sdk/src/errors.ts` | 41.66 / 25.00 | **100 / 100** | 10（7 个错误码映射、未知码降级、retryAfterMs/CAS getter 类型守卫） |
+| `apps/server/src/ws/framing.ts` | 68.57 / 50.94 | **100 / 100** | 12（解码 4 种输入/非法 JSON、control 判定、resume/ping、所有出站帧构造） |
+| `apps/server/src/modules/system.ts` | 72.72 / 16.66 | **100 / 100** | 4 + 1 集成（默认值、types 过滤、非 WS 路径、角色门禁、订阅生效） |
+| `apps/cli/src/commands/workspace.ts` | 0 / 0 | **100 / 100** | 5（create/list/disable、--max-agents、JSON 模式、缺参 UsageError） |
+| `apps/server/src/cli/backup.ts` | 76.00 / 52.77 | **94.00 / 80.55** | 6（参数解析错误、同源目标、缺失/损坏库；`isMainModule` 入口分支不构造） |
+
+### 故障注入自检（逐文件）
+
+| 注入 | 结果 |
+| --- | --- |
+| transport：`onClose` 缺省码 `1006 → 1005` | **红**（close 事件断言） |
+| errors：`-32001` 映射改为 `ForbiddenError` | **红**（错误类映射） |
+| framing：`buildPongFrame` 恒写 `ts: 0` | **红**（pong 帧形状） |
+| system：去掉 `types` 字符串过滤 | **红**（订阅结果/`setSessionSubscription` 参数） |
+| cli workspace：`createWorkspace` 丢弃 `maxAgents` | **红**（CLI 参数透传） |
+| backup CLI：catch 分支返回 0 | **红**（4 条失败路径断言） |
+
+全部恢复后重跑：SDK 22 / server 341 / cli 27 全绿。
+
+### 补测过程中发现的真实缺陷（独立 fix，`450b4f6`）
+
+`apps/server/src/modules/system.ts` 的覆盖率低不是"缺测试"而是**接错线**：
+`system.subscribe` 读 `ctx.session`，但 `DispatchContext` 无该字段、dispatcher 不转发、gateway 不传，
+导致订阅从未生效。新增集成测试（订阅 socket 收到匹配 domain 事件）先红后绿；
+修复见 changelog「修复 `system.subscribe` 订阅从未生效」。
+
+### 未覆盖边界（诚实记录）
+
+- `apps/server/src/cli/backup.ts` 的 `isMainModule()` 入口分支（进程直接执行）不在测试中构造；
+  由 `scripts/backup.sh` / `verify:docker` 实际执行覆盖。
+- `packages/sdk/src/index.ts`、`types.ts` 为 0 可执行行（纯 re-export / 类型），0% 无意义。
+- 覆盖率仍是**行/分支**度量，不等于行为正确性；本次正向订阅测试即为反例（行覆盖低掩盖了断线）。
 
