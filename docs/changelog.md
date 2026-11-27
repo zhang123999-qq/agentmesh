@@ -2,6 +2,15 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — CI 基线确认（run 45960323420）
+
+- 推送 `3d80e00..3328c29`（含恢复演练、静态加密决策、单实例边界、覆盖率度量）到 `origin/main`。
+- CI run **45960323420** 全绿：`verify` / `web-e2e` / **`coverage (advisory)`** 均为 success；
+  `audit (cron)` 因 push 事件 skipped（符合设计）。
+- Docker workflow run **45960323502** success（Linux `verify:docker` 四定时器断言）。
+- `job-coverage` 首次在 CI 产出 `coverage/` artifact；无配置修复需要。
+- 结论：覆盖率基线（86.19% 行）已在 CI 侧确认；本地 608 测试与 CI 一致。
+
 ## 2026-11-27 — 覆盖率度量（advisory）
 
 > **本机无 Docker：M9 仍未签字**（唯一 P0 阻断不变）。测试基线 **608** 不变；本提交只新增度量，
