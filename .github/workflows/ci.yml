@@ -63,6 +63,30 @@ jobs:
           path: apps/web/test-results
           if-no-files-found: ignore
 
+  coverage:
+    name: coverage (advisory)
+    # Measurement only — no thresholds yet (docs/decisions.md「覆盖率度量」).
+    # Kept out of `verify` so it never slows the required gate; promote to
+    # required once per-package floors are set from a stable baseline.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: coverage (per workspace)
+        run: npm run coverage
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage
+          if-no-files-found: warn
+
   audit-cron:
     name: audit (cron, advisory)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

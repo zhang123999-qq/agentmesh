@@ -2,6 +2,34 @@
 
 本记录从本地工作树开始，不包含 qwenpaw 容器侧的原始提交链。
 
+## 2026-11-27 — 覆盖率度量（advisory）
+
+> **本机无 Docker：M9 仍未签字**（唯一 P0 阻断不变）。测试基线 **608** 不变；本提交只新增度量，
+> 不改测试、不改 seq/哈希/广播/ RPC 计数、不改运行行为。
+
+- 新增 `@vitest/coverage-v8@5.1.1`（根 devDependency，与 vitest 5.1.1 对齐）+ `scripts/coverage.mjs`：
+  逐 workspace 运行 `vitest run --coverage`，输出 `coverage/<pkg>/{lcov,json-summary,text-summary}`，
+  并打印按包汇总；任一 workspace 测试失败则整体非 0 退出。
+- 根脚本 `npm run coverage`（先执行 `pretest` 构建，再度量）；CI 新增
+  **`job-coverage`（advisory，`continue-on-error: true`）**，上传 `coverage/` artifact；
+  **不并入 `verify`**。
+- 4 个决策（decisions.md「覆盖率度量」）：工具 = vitest 内置 + v8；**先不设门槛**（两周后按
+  "基线 −5pp"设按包下限，再转 required）；排除项只含生成物/测试自身（**所有 src 含入口都在范围内**）；
+  CI 独立 advisory job。
+- 首次基线（行覆盖，合计 **86.19%**，4144/4808）：server 90.75 / store 91.39 / core 91.62 /
+  protocol 94.32 / sdk 62.93 / adapters 72.72 / mock-agents 82.85 / cli 72.44 / web 95.45。
+- 口径修正（诚实记录）：server 的 7 个集成套件按公开入口导入 `dist`，v8 经 source map 归属不稳
+  （`modules/workspace.ts` 误报 18.75%）。新增 `apps/server/vitest.coverage.config.ts` **仅用于覆盖率运行**，
+  把 `@agentmesh/server` alias 到 `src/index.ts`；修正后该文件 87.5%，server 由 83.63% → 90.75%。
+  普通 `npm test` 仍跑 dist，构建顺序检查不变。
+- 低覆盖高风险清单入 status.md 技术债表：`modules/system.ts`（行 72.72 / **分支 16.66**）、
+  `ws/framing.ts`（68.57 / 50.94）、`sdk/errors.ts`（41.66 / **25**）、`cli/backup.ts`（76 / 52.77）、
+  `apps/cli/src/commands/workspace.ts`（0）、`sdk/transport.ts`（0，14 行）。
+- 已核实非盲区：`metrics.ts` 100/94.28、`auth/revocation.ts` 94.82/74.35、`cli/migration-backup.ts`
+  96.66/78.94、`modules/revocation.ts` 86.66/75、`modules/workspace.ts` 87.5/71.42。
+- 边界：`packages/sdk/src/index.ts` / `types.ts` 为 0 可执行行（0% 无意义）；`scripts/**` 不在覆盖率
+  范围内，`production-restore-drill.mjs` 的负向对照仍由 22 条执行断言保证，不能以覆盖率替代。
+
 ## 2026-11-27 — 生产库恢复演练（覆盖 v11 撤销表）
 
 测试基线：**608** 不变（无代码/测试改动，只有演练脚本与文档）。schema v11 / RPC 26/26 不变。

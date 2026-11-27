@@ -19,6 +19,7 @@
     "test": "npm run test --workspaces --if-present",
     "verify": "npm test && npm run typecheck && npm run lint && npm run build -w @agentmesh/web && npm run audit --omit=dev -w @agentmesh/web",
     "audit": "npm audit --audit-level=high",
+    "coverage": "npm run pretest && node scripts/coverage.mjs",
     "demo": "npm run build && npm run demo -w @agentmesh/mock-agents",
     "drill:restore": "npm run build && node scripts/production-restore-drill.mjs",
     "verify:docker": "npm run build && node docker/verify-local.mjs",
@@ -30,6 +31,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "5.1.1",
     "eslint": "^10.15.0",
     "globals": "^17.14.0",
     "typescript": "^6.0.3",

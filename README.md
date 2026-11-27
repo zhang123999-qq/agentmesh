@@ -68,6 +68,7 @@ npm test                    # 全包单元测试（vitest，当前 608 个，含
 npm run demo                # 起真实服务端 + 三 mock agent 的端到端演示
 npm run verify:docker       # 无 Docker 引擎时的本地部署等价验证
 npm run verify              # typecheck + lint + test（提交前统一校验）
+npm run coverage            # 每包覆盖率（advisory，无门槛；报告写入 coverage/）
 npm run audit               # npm audit --audit-level=high
 ```
 
@@ -145,7 +146,9 @@ BASE_URL=http://localhost:3000 ADMIN_AGENT_ID=agt_xxx ADMIN_SECRET=... \
 **M9 复用**：M9 运行时签字把 `BASE_URL` 指向容器/Caddy origin
 （如 `https://localhost:8443`）即可复用同一份脚本，无需另写 Playwright。
 
-MVP 不强制覆盖率数字，但 `packages/core`、`packages/store` 与 `apps/web` 的核心逻辑必须有单测。
+MVP 不强制覆盖率数字；自 2026-11-27 起以 `npm run coverage` 度量（advisory，无门槛），
+基线 86.19% 行覆盖（按包见 [docs/status.md](docs/status.md)），低覆盖高风险清单同步登记在技术债表。
+`packages/core`、`packages/store` 与 `apps/web` 的核心逻辑必须有单测。
 
 ## 持续集成（CI）
 
@@ -154,6 +157,8 @@ MVP 不强制覆盖率数字，但 `packages/core`、`packages/store` 与 `apps/
     与本地四项门槛逐项一致。
   - `web-e2e`（required）：装 Playwright（`--no-save`，不改 lockfile）+ chromium，起真实本地栈
     （build → `seed-admin` → server:8787 → `next start`:3000）跑 e2e（登录 → 频道 → 发消息）。
+  - `coverage`（advisory）：`npm run coverage` 逐包度量并上传 `coverage/` artifact；**门槛未设**，
+    不阻塞合并（decisions.md「覆盖率度量」）。
   - `audit-cron`（advisory）：每日 06:17 UTC 全量 audit（含 dev）。
 - `.github/workflows/docker.yml`：`verify:docker`（Linux runner 上断言
   `compactionTimerCleared` / `hashChainTimerCleared` 为 `true`，而非 Windows 的 `n/a`）。

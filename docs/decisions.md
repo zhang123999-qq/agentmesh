@@ -996,3 +996,78 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - 若选 C：单列架构故事（DB 外置、事件总线、WS 会话路由），并重审 US-021D（撤销缓存）、
   US-024（presence 分片）、US-025（配额/禁用）与事件 emit 语义。
 
+## 覆盖率度量（2026-11-27，advisory）
+
+> 性质：工程度量，**只度量不改测试**；不改 seq/哈希/广播/RPC 计数。
+
+### 4 个决策
+
+1. **工具：vitest 内置覆盖率 + `@vitest/coverage-v8@5.1.1`**（与 vitest 5.1.1 精确对齐）。
+   理由：零额外配置面、与现有 `vitest run` 同源、TS/ESM 无需转译插件。
+   被否决：standalone c8（第二套工具链、需单独配置与合并）；`@vitest/coverage-istanbul`
+   （更慢，本仓无 Babel/装饰器需求，收益为零）。
+
+2. **门槛：先不设，稳定两周后再设**。当前只输出数字与 artifact；连续两周 CI advisory 结果稳定后，
+   按包设置 **行覆盖下限 = 观察基线 − 5 个百分点（向下取整）**，先在 `job-coverage` 强制，
+   稳定后再把该 job 提升为 required。被否决：立刻设全局阈值（无基线，只能拍脑袋）；
+   单一全局阈值（掩盖包间差异，server 90% / sdk 63% 会被同一个数字掩盖）。
+
+3. **排除项（只排生成物与测试自身）**：
+   `**/dist/**`、`**/node_modules/**`、`**/test/**`、`**/*.test.ts`、`**/*.config.*`、
+   `**/next-env.d.ts`、`**/.next/**`、`apps/web/e2e/**`。
+   **所有 `src` 文件都在范围内，包括入口脚本**（`apps/server/src/index.ts`、
+   `packages/mock-agents/src/demo.ts`）——排除接线代码正是 US-021B 空转 bug 得以隐藏的方式；
+   入口的低覆盖应被看见，而不是被配置掉。migration/backup/revocation/metrics 一律不排除。
+   被否决：排除 `src/cli/**` 与 migrations（它们包含最高风险的备份/迁移路径）。
+
+4. **CI：独立 `job-coverage`（advisory）**，不并入 `verify`。`continue-on-error: true`，
+   产出 `coverage/`（每包 `lcov` + `json-summary` + `text-summary`）作为 artifact；
+   设门槛后先在此 job 强制，稳定后再转 required。被否决：合并进 verify（拖慢必过门禁、
+   覆盖率波动会导致主门禁红）。
+
+### 测量口径（诚实边界）
+
+- **server 的 dist→src 归属**：7 个集成套件按公开入口 `@agentmesh/server`（即 `dist`）导入。
+  v8 无法稳定把这些执行通过 source map 归属回 `src`（实测 `modules/workspace.ts` 误报 18.75%，
+  改为 `vitest.coverage.config.ts` 把该 specifier alias 到 `src/index.ts` 后为 87.5%）。
+  覆盖率运行使用该专用配置；**普通 `npm test` 仍跑 dist**，不改变构建顺序检查。
+- **0 可执行行 ≠ 盲区**：`packages/sdk/src/index.ts`、`types.ts` 为纯 re-export/类型文件
+  （LF=0），0% 无意义。
+- **`scripts/**` 不在覆盖率范围**（不属于任何 workspace）。`scripts/production-restore-drill.mjs`
+  的错误处理与负向对照由**执行断言**保证（22 条断言含"损坏库启动失败"与断言函数自检），
+  不是行覆盖；不得用"有覆盖率"替代该执行证据。
+- 本基线在 **Windows / Node v26.13.0** 测得；CI advisory job 跑 Node 22，数字应一致
+  （行覆盖与平台无关，若不一致按 CI artifact 为准）。
+
+### 基线（2026-11-27，608 测试全绿）
+
+| 包 | 行 % | 分支 % | 函数 % | 语句 % |
+| --- | --- | --- | --- | --- |
+| server | 90.75 | 80.38 | 90.27 | 88.02 |
+| store | 91.39 | 87.87 | 96.00 | 91.47 |
+| core | 91.62 | 81.26 | 91.66 | 89.48 |
+| protocol | 94.32 | 84.90 | 77.14 | 93.33 |
+| sdk | 62.93 | 55.26 | 51.04 | 60.29 |
+| adapters | 72.72 | 52.00 | 64.70 | 69.44 |
+| mock-agents | 82.85 | 50.00 | 78.37 | 79.47 |
+| cli | 72.44 | 54.86 | 73.55 | 71.42 |
+| web | 95.45 | 81.81 | 83.33 | 95.65 |
+| **合计（行）** | **86.19**（4144/4808） | — | — | — |
+
+### 低覆盖高风险清单（归属见 status.md 技术债表）
+
+| 模块 | 行 % | 分支 % | 为什么高风险 |
+| --- | --- | --- | --- |
+| `apps/server/src/modules/system.ts` | 72.72 | **16.66** | admin-only 门禁 + `includeDomainEvents/types` 过滤；分支几乎未测，存在"domain 事件过滤被绕过"风险 |
+| `apps/server/src/ws/framing.ts` | 68.57 | **50.94** | WS 帧解析与 1 MiB 上限错误路径；畸形帧/close code 未覆盖 |
+| `packages/sdk/src/errors.ts` | 41.66 | **25.00** | SDK 错误映射（-32001…-32008 / gap_too_large / -32007）；映射错误会误导所有 agent 客户端 |
+| `apps/server/src/cli/backup.ts` | 76.00 | **52.77** | 备份 CLI 失败路径（integrity 失败、库缺失）；"失败当成功"是备份制度化的核心风险 |
+| `apps/cli/src/commands/workspace.ts` | **0.00** | 0.00 | US-025 的 CLI 薄封装未测；平台 admin 的租户运维入口 |
+| `packages/sdk/src/transport.ts` | **0.00**（14 行） | 0.00 | 浏览器 transport 选择仅由 e2e/手工覆盖，Node 单测不覆盖 |
+
+**已核实为"覆盖良好"的重点模块**（本故事特别要求检查的盲区）：
+`metrics.ts` 100% 行 / 94.28% 分支、`auth/revocation.ts` 94.82% / 74.35%、
+`cli/migration-backup.ts` 96.66% / 78.94%、`modules/revocation.ts` 86.66% / 75%、
+`modules/workspace.ts` 87.5% / 71.42%、`modules/accounts.ts` 91.66% / 86.81%。
+即：US-021B / v11 / 备份制度化新增路径**不是**覆盖率盲区。
+
