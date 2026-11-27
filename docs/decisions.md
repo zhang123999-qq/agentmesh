@@ -898,3 +898,101 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 5. **复审条件**：首个外部租户上线前（检查 A 是否落地）；启用共享存储/多实例（重评 B）；
    合规审计给出具体条款（按条款选择 A/B）。
 
+## 单实例边界与扩展路径（2026-11-27 决策，已锁死）
+
+> 性质：决策 + 文档，**本故事不开代码**。operations.md 增加容量评估与扩容决策树；
+> status.md 技术债表登记"无每租户限流"。
+
+### 1. 现状：哪些组件假设单进程（逐条带代码位置）
+
+| # | 组件 | 位置 | 多实例后果 |
+| --- | --- | --- | --- |
+| 1 | SQLite 单写者（`better-sqlite3`，WAL） | `packages/store/src/db.ts` | 同主机多进程可被 SQLite 文件锁串行化，但**网络盘/共享卷不受支持**；吞吐上限仍是单写者 |
+| 2 | reclaim 定时器（`reclaimExpired` + `closeExpiredBidding`） | `apps/server/src/app.ts:384` | 每实例各跑一份：CAS 保证单个任务不被重复回收，但重复扫描 + 重复日志；窗口关闭事件只会成功一次 |
+| 3 | compaction 定时器 | `apps/server/src/modules/tasks.ts:2055` | 幂等，但会重复写 `task.compaction.completed` 事件（审计噪声）与重复扫描 |
+| 4 | hashChain 定时校验 | `apps/server/src/modules/hash-chain.ts:103` | 只读，重复计算开销；`/health` 状态各实例独立 |
+| 5 | revokedTokensCleanup 定时清理 | `apps/server/src/auth/revocation.ts:139` | `DELETE` 幂等，重复执行无害 |
+| 6 | presence（`#connections: Map<workspaceId, Map<agentId, Set<WsSession>>>`） | `apps/server/src/ws/gateway.ts:211` | **分裂**：每个实例只知道自己连接上的 agent，`onlineAgents`/presence 广播不完整 |
+| 7 | WS 广播与 `system.subscribe`（per-session 订阅标记） | `apps/server/src/ws/gateway.ts` | **无跨实例 fan-out**：事件只推给本实例 socket；订阅状态是连接级，重连到别的实例需重新订阅（SDK 已每连接重订阅，US-020 决策 5） |
+| 8 | 限流器（auth failure / registration / agent bucket） | `apps/server/src/auth/rate-limit.ts` | 进程内 LRU：有效限额 = 实例数 × 配置值 |
+| 9 | MetricsRegistry（counter/gauge/histogram） | `apps/server/src/metrics.ts`、`apps/server/src/app.ts:473-498` | 每实例独立 `/metrics`，需抓取全部实例并聚合（见第 5 节） |
+| 10 | 迁移前自动备份（`prepareMigrationBackup`） | `apps/server/src/index.ts:68`、`apps/server/src/cli/migrate.ts:58` | 多实例同时首启会并发快照/迁移；命名含秒级时间戳，**无文件锁** |
+| 11 | v11 撤销 LRU 缓存（DB 为真源） | `apps/server/src/auth/revocation.ts` | 缓存按实例各自 1 万；`isRevoked` 未命中回退 DB → **无假阴性**；撤销在 A 实例落库后 B 实例回退 DB 即正确；容量与一致性可接受 |
+| 12 | 邀请码 / 配额校验（DB 查询，无内存缓存） | `apps/server/src/modules/accounts.ts:527,877` | 无缓存同步问题；但**配额检查在写事务之外**（`:527` 检查，`:557` 才 `withTransaction`）——单进程内检查与插入之间无 await，安全；**多实例并发可超配额** |
+| 13 | WS 心跳定时器 | `apps/server/src/ws/gateway.ts:285` | 每实例独立，无冲突 |
+| 14 | SQLite 句柄与 `app.close()` | `apps/server/src/app.ts` / `index.ts` | 每实例独立，无冲突 |
+
+**最大阻断**是第 6/7 项：没有跨实例事件总线时，多实例部署会**丢实时消息**（A 实例写入的事件不会
+到达连在 B 实例上的订阅者）。这决定了"多副本"不能只靠数据库共享。
+
+### 2. 方案与结论
+
+| 方案 | 内容 | 成本 | 解决的组件 | 未解决的 |
+| --- | --- | --- | --- | --- |
+| **A：声明单实例** | 文档明确容量上限与垂直扩容路径 | 低 | 全部（不承诺多实例） | 无高可用；扩容上限 |
+| B：定时器 leader election + 备份文件锁 | 多副本但实时面单活（active-passive） | 中 | 2/3/4/5/10 | 6/7（除非会话粘滞 + 主备切换时断开）、9（需聚合） |
+| C：Postgres + Redis/NATS + 队列 | 彻底水平扩展 | 高 | 全部 | 需重审 US-021D/024/025 的内存结构与 CAS 语义 |
+
+**结论：采用 A。** MVP 明确声明单实例；在触达容量上限前不引入 B/C。被否决的替代方案：
+- B（现在做）：多副本仍需会话粘滞与实时面单活，收益低、复杂度提前引入；
+- C（现在做）：Postgres/事件总线会重写租户、presence、撤销缓存与迁移体系，超出当前阶段。
+
+**B/C 触发条件**（满足任一即启动独立故事）：
+- 需要高可用/零停机发布（B，active-passive + leader election + 备份文件锁）；
+- 单实例压测触达保守容量上限的 50%，或需要跨主机多写（C）；
+- 租户要求数据驻留/密码学隔离（按租户分库，A/B 都可，与静态加密决策联动）。
+
+### 3. 容量评估（**未压测估算**，对外 SLA 前必须验证）
+
+| 维度 | 单实例合理上限（估算） | 依据 |
+| --- | --- | --- |
+| 并发 WS 连接 | 1,000–2,000 | Node + `ws` 每 socket 约 20–50 KB，另加心跳定时器；受 RSS 与 fd 限制 |
+| 事件写入 | 100–500 events/s | 每次 RPC 一个 SQLite 事务（WAL），单写者串行化；NVMe + 合理 fsync 节奏 |
+| 消息扇出 | 与写入同量级 | 广播 CPU 随本实例订阅者数线性增长 |
+| 频道数 | 每租户数百（无硬限制） | 广播成本约束；无跨频道索引压力 |
+| 租户 / 账号 | ≤ 100 租户 / ≤ 10,000 账号 | `maxAgents` 默认 100；`/metrics` 仅聚合 gauge |
+| 撤销表 | 行数 ≤ 未过期撤销数 | 每小时清理；增长速率 ≈ 撤销次数/小时 |
+| 备份窗口 | 与库大小线性 | `better-sqlite3` online backup；大会延长迁移/启动时间 |
+
+这些数字是**架构推算，不是实测**。结论：在首个外部租户前必须跑第 4 节压测，用拐点重写本表。
+
+### 4. 压测计划（方法；不在本故事执行）
+
+1. **工具**：`ws` 压测脚本（N 连接 × 每连接 M 条 `message.send`/`task.progress`）+ `autocannon`
+   打 `/health` 与 `/metrics`；真实 Fastify + 临时 SQLite（不用内存库）。
+2. **变量**：连接数 100 → 500 → 1,000 → 2,000；每级稳定 5 分钟；消息速率按当前级线性加压。
+3. **观测**：`agentmesh_rpc_duration_ms` P95、`agentmesh_rpc_requests_total{code!="ok"}` 错误率、
+   `/health.hashChain`、进程 RSS、WAL/DB 文件大小、事件 seq 增长速率、客户端收到的消息缺口（seq 连续性）。
+4. **判据**：P95 > 1s 或错误率 > 1% 或消息缺口 > 0 即视为拐点；**保守容量 = 拐点 × 0.5**。
+5. **产出**：容量表 + 瓶颈定位（CPU / SQLite 写锁 / 广播 / 内存）写入 operations.md；
+   若拐点低于预期需求 → 触发 C 的评估。
+
+### 5. 可观测性聚合规则（多实例前必须确定）
+
+| 指标 | 聚合方式 | 理由 |
+| --- | --- | --- |
+| `agentmesh_rpc_requests_total{method,code}` | `sum by (method, code)` | counter 可加 |
+| `agentmesh_rpc_duration_ms`（histogram） | 先 `sum` bucket，再 `histogram_quantile` | 直方图桶可合并 |
+| `agentmesh_ws_sessions` | `sum` | 每实例只统计自己的连接 |
+| `agentmesh_hashchain_status{status}` | `max by (status)` | 任一实例 mismatch 即应告警 |
+| `agentmesh_workspaces_total` / `_disabled` | `max` | DB 全局值，各实例相同，`sum` 会重复计数 |
+| `agentmesh_revoked_tokens_active` | `max` | DB 全局值 |
+
+单实例下无变化；多实例前把上述规则写入 Prometheus 配置（不是改应用代码）。
+
+### 6. 多租户交互（单实例下的爆炸半径）
+
+- **无资源隔离**：一个租户的突发写入/广播会拖慢所有租户（共享事件循环与 SQLite 写锁）。
+- `maxAgents` 只是**数量**上限，不是速率上限；当前**没有每租户限流**——登记为技术债。
+- 建议对外 SaaS 前新增 per-tenant 速率限制（按 `workspaceId` 分桶的 LRU；**workspaceId 不进指标
+  label**，保持低基数），单列故事。
+- 配额竞态（第 1 节 #12）：若未来采用 B/C，必须把 `count` 检查与 `accounts.create` 放进**同一写事务**，
+  或改用数据库约束/原子计数。
+
+### 7. 实现边界
+
+- 本故事**只做决策与文档**，不改任何代码。
+- 若选 B：单列故事（leader election、备份文件锁、定时器幂等审计、会话粘滞/切换策略）。
+- 若选 C：单列架构故事（DB 外置、事件总线、WS 会话路由），并重审 US-021D（撤销缓存）、
+  US-024（presence 分片）、US-025（配额/禁用）与事件 emit 语义。
+
