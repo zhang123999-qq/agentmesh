@@ -247,3 +247,19 @@ curl -kf https://localhost:8443/health
 - **指标**：`GET /metrics` 的 `agentmesh_revoked_tokens_active`（当前未过期撤销数）。
 - **备份/恢复**：撤销表随库备份；`scripts/production-restore-drill.mjs` 已实测覆盖（恢复后及二次重启后旧 token 仍 -32001，`revoked_tokens_active` 恢复前后一致）。
 - 跨租户撤销：调用者 workspace 必须等于目标 token 的 workspace，否则 -32002。
+
+## 静态加密（对外 SaaS 部署要求，方案 A）
+
+> 决策见 decisions.md「静态加密与密钥管理」。**部署级要求，不改代码。**
+
+- **对外 SaaS 部署必须启用卷/盘级加密**（云盘加密 / LUKS 等）+ **外部 KMS 托管数据密钥**；
+  KMS 不可达时数据卷不得挂载（fail closed）。
+- **密钥与 `JWT_SECRET` 分离**：不同 secret、不同轮换周期；数据密钥不得出现在 compose/镜像/仓库/日志。
+- **轮换**：按 KMS 卷密钥轮换流程（快照 → 新密钥 → 重建卷），目标 ≤ 12 个月或按合规条款；
+  轮换后执行一次 `scripts/production-restore-drill.mjs`。
+- **离卷/异地备份必须独立加密**（age/GPG 或对象存储 SSE-KMS），备份密钥与卷密钥分离且不与备份同处；
+  恢复演练同时断言"备份可解密"与"KMS 可用"。
+- **密钥丢失 = 全库不可恢复**：启用 KMS 删除保护/版本控制与 break-glass 策略，runbook 写明联系人。
+- **多租户**：MVP 不做按租户密钥隔离（单库单密钥）；租户要求密码学隔离时单列故事（分库或 per-tenant key）。
+- **SQLCipher（方案 B）**：仅在客户要求"库文件/备份本身为密文"时单列 US-026（含 v12 重加密迁移、
+  备份/恢复改造、回滚与性能基准）。**应用层字段加密（方案 C）已否决**（与哈希链冲突）。
