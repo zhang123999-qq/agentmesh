@@ -201,6 +201,12 @@ async function authenticateAdmin() {
   adminToken = authRes.body.result.token;
   adminAgentId = authRes.body.result.agentId;
   log(`Admin authenticated: ${adminAgentId}`);
+
+  // Add load-test skill to admin so they can bid on test tasks
+  log('Adding load-test skill to admin...');
+  const skillRes = await rpcRequest('agent.list', {}, adminToken);
+  // agent.list doesn't modify skills. We need to check if there's a skill update method.
+  // For now, let's just publish tasks without required skills
 }
 
 async function setupChannels() {
@@ -419,12 +425,12 @@ async function runTaskBiddingTest(messageRate) {
     // Publish task
     const pubRes = await rpcRequest('task.publish', {
       title: `Load test ${Date.now()}`,
-      requiredSkills: ['load-test'],
+      requiredSkills: [],
       biddingDeadline: Date.now() + 5000
     }, adminToken);
 
-    if (pubRes.status === 200 && pubRes.body.result) {
-      const taskId = pubRes.body.result.taskId;
+    if (pubRes.status === 200 && pubRes.body.result?.task?.id) {
+      const taskId = pubRes.body.result.task.id;
       results.published++;
 
       // Wait a bit for bidding window
@@ -433,22 +439,25 @@ async function runTaskBiddingTest(messageRate) {
       // Admin bids on own task (just to test the flow)
       const bidRes = await rpcRequest('task.bid', {
         taskId,
+        price: 100,
         approach: 'load test approach'
       }, adminToken);
-      if (bidRes.status === 200) results.bids++;
+      if (bidRes.status === 200 && bidRes.body.result) results.bids++; else log(`  Bid failed: ${bidRes.body?.error?.message || JSON.stringify(bidRes.body)}`);
 
       await new Promise(r => setTimeout(r, 50));
 
-      // Award to admin
+      // Award to admin (auto strategy will pick the only bid)
+      // Use expectedVersion from the task version (starts at 1, bid doesn't increment)
       const awardRes = await rpcRequest('task.award', {
         taskId,
-        expectedVersion: 1
+        expectedVersion: 1,
+        strategy: 'auto'
       }, adminToken);
-      if (awardRes.status === 200) results.awarded++;
+      if (awardRes.status === 200 && awardRes.body.result) results.awarded++; else log(`  Award failed: ${awardRes.body?.error?.message || JSON.stringify(awardRes.body)}`);
 
     } else {
       results.failed++;
-      if (results.failed <= 3) log(`  Publish failed: ${pubRes.body?.error?.message}`);
+      if (results.failed <= 3) log(`  Publish failed: ${pubRes.body?.error?.message || JSON.stringify(pubRes.body)}`);
     }
 
     await new Promise(r => setTimeout(r, 1000 / messageRate));

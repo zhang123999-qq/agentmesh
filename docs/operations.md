@@ -259,8 +259,9 @@ curl -kf https://localhost:8443/health
 >
 > **已知限制**：
 > 1. 仅测试单 WS 连接下的吞吐；多连接并发未测（受限于注册限流）
-> 2. `task.bid` / `task.award` 参数校验失败（-32602），任务吞吐可能偏低
+> 2. 任务竞标/授标受限于 agent 速率限制（默认 10 req/s），未测试多 worker 并发
 > 3. Windows 环境非 Linux 生产环境，仅供参考
+> 4. **参数校验 Bug 已修复**：`task.bid`/`task.award` 曾因缺少必填参数返回 -32602，现已修复
 
 ### 扩容决策树
 
