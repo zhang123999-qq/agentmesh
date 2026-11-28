@@ -7,6 +7,8 @@
  * receive a frozen, fully validated {@link ServerConfig}.
  */
 
+import { readFileSync } from 'node:fs';
+
 import {
   DEFAULT_AUTH_FAIL_WINDOW_SECONDS,
   DEFAULT_AUTH_LOCKOUT_SECONDS,
@@ -400,7 +402,20 @@ function resolveJwtSecret(
   nodeEnv: string,
 ): string {
   const isProduction = nodeEnv === 'production';
-  const raw = env.JWT_SECRET?.trim();
+  let raw = env.JWT_SECRET?.trim();
+  // Docker Compose `exec` sessions never run the entrypoint, so they never
+  // get the JWT_SECRET the entrypoint reads from the secret file. Let the
+  // config read the file directly as a fallback (explicit JWT_SECRET wins).
+  if (!raw && env.JWT_SECRET_FILE) {
+    try {
+      raw = readFileSync(env.JWT_SECRET_FILE, 'utf8').trim();
+    } catch (error) {
+      throw new ConfigError(
+        `cannot read JWT secret file ${env.JWT_SECRET_FILE}: ${error instanceof Error ? error.message : String(error)}`,
+        'JWT_SECRET_FILE',
+      );
+    }
+  }
   if (!raw) {
     if (isProduction) {
       throw new ConfigError(

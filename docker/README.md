@@ -8,9 +8,15 @@ the server down gracefully.
 - **Migrations:** the server still migrates automatically on startup
   (`openStore`). `npm run migrate -w @agentmesh/server -- --db <path>` is a
   separate, idempotent entrypoint for production runbooks. Both are safe to run.
-- **JWT secret:** mounted as a Docker secret at `/run/secrets/jwt_secret`; the
-  entrypoint reads it into `JWT_SECRET`. The secret never enters the image,
-  `compose.yaml`, or logs. Production requires ≥32 bytes; weak values fail fast.
+- **JWT secret:** mounted as a Docker secret at `/run/secrets/jwt_secret`. The
+  entrypoint starts as root only to read the file (created mode 600), exports
+  it as `JWT_SECRET`, then drops to the unprivileged `app` user with `runuser`
+  before starting the server — Compose file secrets keep the host file's
+  ownership and permissions, so the server process itself must never read the
+  file. CLI commands run with `docker compose exec` read the same file through
+  `JWT_SECRET_FILE` (config fallback; explicit `JWT_SECRET` wins). The secret
+  never enters the image, `compose.yaml`, or logs. Production requires ≥32
+  bytes; weak values fail fast.
 - **TLS:** **Caddy** terminates TLS. Local/default uses `tls internal`; for
   production set `DOMAIN` and `CADDY_TLS_DIRECTIVE=` (empty) so Caddy obtains a
   public certificate. `ALLOWED_ORIGINS` must list the exact `https://DOMAIN`.

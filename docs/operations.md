@@ -105,6 +105,8 @@ curl -kf https://localhost:8443/health
 ```
 
 - **Secret**：只从 Docker secret `/run/secrets/jwt_secret` 注入；镜像/compose 不含明文。
+  entrypoint 以 root 起读 600 文件后 `runuser` 降权到 `app` 再启动服务；`docker compose exec`
+  的 CLI 经 `JWT_SECRET_FILE`（config 回退）读同一文件。
 - **TLS**：Caddy 终止。生产设置 `DOMAIN=app.example.com`、
   `CADDY_TLS_DIRECTIVE=`（空）、`ALLOWED_ORIGINS=https://app.example.com`、
   `HTTPS_PORT=443 HTTP_PORT=80`。

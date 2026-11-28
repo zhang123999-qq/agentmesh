@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -77,6 +81,49 @@ describe('loadConfig', () => {
         ALLOWED_ORIGINS: 'https://app.example.com',
       }),
     ).toThrow(/JWT_SECRET is required/);
+  });
+
+  it('reads JWT_SECRET from JWT_SECRET_FILE when JWT_SECRET is unset', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agentmesh-config-'));
+    try {
+      const secretPath = join(dir, 'jwt_secret.txt');
+      writeFileSync(secretPath, '0123456789abcdef0123456789abcdef\n');
+      const config = loadConfig({
+        NODE_ENV: 'production',
+        JWT_SECRET_FILE: secretPath,
+        ALLOWED_ORIGINS: 'https://app.example.com',
+      });
+      expect(config.jwtSecret).toBe('0123456789abcdef0123456789abcdef');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers JWT_SECRET over JWT_SECRET_FILE', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agentmesh-config-'));
+    try {
+      const secretPath = join(dir, 'jwt_secret.txt');
+      writeFileSync(secretPath, '0123456789abcdef0123456789abcdef');
+      const config = loadConfig({
+        NODE_ENV: 'production',
+        JWT_SECRET: 'fedcba9876543210fedcba9876543210',
+        JWT_SECRET_FILE: secretPath,
+        ALLOWED_ORIGINS: 'https://app.example.com',
+      });
+      expect(config.jwtSecret).toBe('fedcba9876543210fedcba9876543210');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast when JWT_SECRET_FILE does not exist', () => {
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        JWT_SECRET_FILE: '/definitely/not/here/jwt_secret.txt',
+        ALLOWED_ORIGINS: 'https://app.example.com',
+      }),
+    ).toThrow(/cannot read JWT secret file/);
   });
 
   it('rejects a too-short JWT_SECRET', () => {

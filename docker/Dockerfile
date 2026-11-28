@@ -16,6 +16,8 @@ COPY packages/core/package.json packages/core/
 COPY packages/sdk/package.json packages/sdk/
 COPY packages/adapters/package.json packages/adapters/
 COPY packages/mock-agents/package.json packages/mock-agents/
+COPY apps/web/package.json apps/web/
+COPY apps/cli/package.json apps/cli/
 
 RUN npm ci --include=dev
 
@@ -57,7 +59,9 @@ RUN chmod 0755 /usr/local/bin/agentmesh-entrypoint /usr/local/bin/agentmesh-back
  && chown -R app:app /app/data \
  && chmod 700 /app/data
 
-USER app
+# The server itself runs as `app` (see entrypoint.sh, which starts as root
+# only to read the 600 Docker secret, then drops privileges with runuser).
+# Do NOT add `USER app` here: the entrypoint must start as root.
 
 EXPOSE 8787
 
