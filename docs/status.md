@@ -19,7 +19,7 @@
 | US-019 | **完成（本地验证）** | Next.js 管理后台：admin-only，SSR 跳过 WS，全局 seq 去重，auto gap 策略，audit view，Playwright smoke 策略 |
 | US-020 | **完成（本地验证）** | `system.subscribe`：admin opt-in domain events，per-session 订阅，RPC 22/22 |
 | US-021B | **完成（本地验证，P1 已核实并修复空转 bug）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理；`verify:docker` 显式断言定时器 start/clear |
-| US-021G | **完成（本地验证，e2e 未执行）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本就绪（供 M9 复用），因 npm arborist 缺陷 + 无浏览器未在本机执行 |
+| US-021G | **完成（本地验证 + e2e 已执行，2026-11-28）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本已在 InstaBox 01 真实栈上跑通 2/2（登录页渲染 + 登录→建频道→发消息可见），M9 第 10 项同证 |
 | US-021C | **完成（本地验证）** | 事件哈希链定期校验：分批 verify、启动一次 + 定时（默认 1h）、`/health.hashChain`、verify:docker 定时器断言 |
 | US-021D | **完成（本地验证）** | token 撤销：`agent.revokeToken`（admin，23/23）、进程内 LRU + verify 校验、重启不保留（文档） |
 | US-021E | **已锁死（2026-11-23）** | 多租户设计：workspace 一等公民、23 RPC 归属表、presence 隔离、拆 US-022…025 |
@@ -30,8 +30,8 @@
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
 | US-021D-followup | **完成（本地验证）** | 撤销持久化 v11：`revoked_tokens` 表 + LRU 缓存 + 启动预热（失败阻断）+ 清理定时器 + `/metrics` gauge；重启后仍失效 |
 
-测试基线：**651**
-（core 55 / protocol 109 / store **78** / sdk **22** / adapters 7 / mock-agents 1 / server **341** / cli **27** / **web 11**）。
+测试基线：**654**
+（core 55 / protocol 109 / store **78** / sdk **22** / adapters 7 / mock-agents 1 / server **344** / cli **27** / **web 11**）。
 schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本
 （**2026-11-27 生产库演练 PASS**：含租户/消息/任务/撤销表，恢复后及二次重启后撤销仍 -32001）。
 覆盖率（2026-11-27 补测后，advisory，门槛未设）：**行 87.84%**（server 92.02 / store 91.39 /
@@ -49,8 +49,9 @@ core 91.62 / protocol 94.32 / sdk 74.12 / adapters 72.72 / mock-agents 82.85 / c
 > 返回 seq+aggregateId）；server 启动一次 + 定时（默认 1h）；`/health.hashChain`；`verify:docker`
 > 断言 `hashChainTimerStarted/Cleared`。
 
-> US-021G Web 测试基线（2026-11-23）：web `test` 改为 `vitest run` 纳入根 verify（单元 7 + 集成 4）；
-> e2e 脚本已就绪（BASE_URL 参数化，供 M9 复用）但未在本机执行（npm arborist 缺陷 + 无浏览器/栈）。
+> US-021G Web 测试基线（2026-11-23 单元/集成；**2026-11-28 e2e 已执行**）：web `test` 改为
+> `vitest run` 纳入根 verify（单元 7 + 集成 4）；e2e 脚本已在 InstaBox 01 真实栈上跑通 2/2
+> （BASE_URL 参数化，供 M9 复用；实测走法见 operations.md「M9 运行时签字」）。
 
 > US-021B P1 覆盖率核实（2026-11-23）：`domain-event-payload.test.ts` **12→16**、`tasks.compaction.test.ts`
 > **7→8**（含真实压缩/定时器断言）。sdk 的“8”是历史误计（自 US-020 起为 9）。核实中发现并修复两个
@@ -229,8 +230,10 @@ US-018 的关键语义：
 1. **US-016 CLI**：复用 SDK；配置/profile、history 游标、-32007/-32005 UX。
 2. **US-020 `system.subscribe`**（归属与语义已定，见 decisions.md），完成后 RPC 22/22。
 3. **US-019…US-021 Web**（必须复用 SDK；默认只用 `on()`）。
-4. **M9 compose 验证**：在具备 Docker 的环境执行 `docker compose up`，确认 `/health` 200
-   与 SIGTERM 优雅关闭后，再把 M9 标记为完全达成。
+4. **M9 compose 验证**：**已完成（2026-11-28，InstaBox 01）**——`docker compose up`、
+   Caddy internal TLS、Linux SIGTERM 优雅关闭（退出码 143、WS 3ms 内关闭、定时器清理）、
+   容器内 seed-admin、卷持久化、恢复演练（22 断言 PASS）、容器内 audit（0 漏洞）、
+   Web e2e 2/2；证据见 [operations.md](operations.md)「M9 运行时签字」。
 
 ## 溯源说明
 

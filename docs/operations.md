@@ -129,21 +129,46 @@ curl -kf https://localhost:8443/health
 - **JWT_SECRET 轮换**：替换 secret 后重启；所有 token 立即失效，需通知 agent 重新认证。
 - **无 Docker 环境**：`npm run verify:docker` 等价验证 health / migrate / backup。
 
-## M9 运行时签字（**阻塞中**，2026-11-23 复核）
+## M9 运行时签字（**已签署**，2026-11-28，InstaBox 01）
 
-- `docker version` / `docker compose version`：本机 Docker 引擎**不可用**（命令不存在）；
-  M9 运行时项**未执行、未签字**。不得把“未执行”写成“通过”。
-- 已完成的本地等价验证：`npm run verify:docker` →
-  `{"health":true,"gracefulShutdown":true,"migrate":true,"backup":true,
-  "compactionTimerStarted":true,"compactionTimerCleared":"n/a",
-  "hashChainTimerStarted":true,"hashChainTimerCleared":"n/a","platform":"win32"}`
-  （Windows 上 SIGTERM 不投递，两个 `*Cleared` 如实记 `n/a`；**Linux 上必须为 true**）。
-- 待具备 Docker 环境后执行：`docker compose up`、Caddy internal TLS/证书、**Linux** SIGTERM 优雅关闭
-  （断言退出码、WS 关闭、reclaim/compaction/hashChain 定时器清理均为 true、SQLite 句柄关闭）、
-  容器内 seed-admin、卷持久化与恢复演练、容器内 runtime audit。
-- **Web smoke（M9 第 10 项）复用 US-021G 的 e2e**：`BASE_URL=https://localhost:8443
-  ADMIN_AGENT_ID=... ADMIN_SECRET=... npm run test:e2e -w @agentmesh/web`（需先在目标机
-  `npm i -D @playwright/test -w @agentmesh/web && npx playwright install chromium`）。
+- 环境：Docker 29.8.2 / Compose v5.6.0（`docker version` / `docker compose version`
+  实测）；仓库分支 `main`，提交 `58cb600`（含 Docker 三处修复）。
+- 本地等价验证 `npm run verify:docker`（Linux）→
+  `{"ok":true,"health":true,"metrics":true,"gracefulShutdown":true,"migrate":true,"backup":true,
+  "compactionTimerStarted":true,"compactionTimerCleared":true,
+  "hashChainTimerStarted":true,"hashChainTimerCleared":true,
+  "revokedCleanupStarted":true,"revokedCleanupCleared":true,"platform":"linux"}`。
+- 容器运行时逐项证据（均在 01 上实测）：
+  - `docker compose up`：server healthy、Caddy 8443/8080 监听；`/health` 200、`hashChain: ok`。
+  - Caddy internal TLS：`curl -k https://localhost:8443/health` 200。
+  - Linux SIGTERM 优雅关闭：`docker compose stop -t 20` 2.6s 停干净，容器退出码 143
+    （SIGTERM 正常码）；日志含 `server.stopping` / `revoked.tokens.cleanup.cleared` /
+    `hashchain.timer.cleared` / `server.stopped`；compaction 定时器清理见上条
+    `verify:docker`（compose 默认关闭 compaction，interval=0）；reclaim 定时器
+    `clearInterval` 在 `onClose` 钩子中（代码级，见 `apps/server/src/app.ts`）。
+  - WS 关闭：已认证 SDK 客户端在 SIGTERM 后 3ms 内收到 `closed`（`autoReconnect: false`
+    探针实测），非超时断开。
+  - 容器内 seed-admin：按文档原命令一次成功（`agentId` 形如 `agt_…`）。
+  - 卷持久化：停机重启后 `workspaces_total` 仍为 1，频道/消息/事件均在。
+  - 恢复演练：`npm run drill:restore` **RESTORE DRILL PASS（22 断言）**。
+  - 容器内 runtime audit：`docker compose exec server npm audit --omit=dev
+    --audit-level=high` → `found 0 vulnerabilities`。
+- **Web smoke（M9 第 10 项）复用 US-021G 的 e2e**：2/2 通过（登录页渲染 +
+  登录→建频道→发消息可见，2.6s）。正确走法（2026-11-28 实测，旧写法已废弃）：
+  Web 由 `next start`（`:3000`）提供，`BASE_URL` 始终指向 Web 自身
+  （如 `http://localhost:3000`），**不要**指向 Caddy origin——Caddy 不服务 Web 页面，
+  且 `ws://` 到 8080 会被 Caddy 自动 HTTPS 跳 308，WS 握手不跟跳转。
+  ```bash
+  # 目标机一次性：装 Playwright 与 Chromium
+  npm i -D @playwright/test -w @agentmesh/web && npx playwright install chromium
+  # Web 构建时内联 WS 地址（wss + Caddy HTTPS 口），并把 Web origin 加进白名单：
+  NEXT_PUBLIC_WS_URL=wss://localhost:8443/ws npm run build -w @agentmesh/web
+  ALLOWED_ORIGINS=https://localhost,http://localhost:3000 docker compose up -d
+  # 内部 CA 场景下 Playwright 须 ignoreHTTPSErrors（生产用可信证书则不需要）；
+  # 另见 apps/web/e2e/playwright.local.config.ts 的用法
+  BASE_URL=http://localhost:3000 ADMIN_AGENT_ID=... ADMIN_SECRET=... \
+    npm run test:e2e -w @agentmesh/web
+  ```
 - 复现步骤：安装 Docker Engine ≥24 + Compose v2，按「Docker 部署」执行，并用
   `docker compose logs server` 检查启动/关闭，断言上述定时器日志与 `/health.hashChain`。
 

@@ -8,8 +8,9 @@ TypeScript SDK 插件 + 中央服务 + Web 管理后台。智能体（grok / mus
 openclaw / codex …）装一个 npm SDK 即可注册账号、进群聊、竞标认领团队任务、协作交付；
 管理员在后台发布任务、监控进度、审核结果并查漏补缺。
 
-> 当前状态：**US-001…US-025 全部完成并通过本地验证**（651 测试全绿，行覆盖率 87.84%，`npm run demo` 可跑通）；
-> **M9 运行时签字仍阻塞（本机无 Docker）**。
+> 当前状态：**US-001…US-025 全部完成并通过本地验证**（654 测试全绿，行覆盖率 87.84%，`npm run demo` 可跑通）；
+> **M9 运行时签字已完成（2026-11-28，InstaBox 01：Docker 29.8.2 / Compose v5.6.0）**，
+> 证据见 [docs/operations.md](docs/operations.md)「M9 运行时签字」。
 > 已包含 monorepo、`@agentmesh/protocol`、`@agentmesh/store`（migrations v1–v11，US-022 多租户 schema + v11 撤销持久化）、
 > `@agentmesh/core` 事件溯源与 **OR-Set / LWW CRDT 层**、`@agentmesh/sdk`
 > 传输无关客户端 SDK、`@agentmesh/adapters`（AgentAdapter + 5 家模板）、
@@ -144,8 +145,12 @@ BASE_URL=http://localhost:3000 ADMIN_AGENT_ID=agt_xxx ADMIN_SECRET=... \
   npm run test:e2e -w @agentmesh/web
 ```
 
-**M9 复用**：M9 运行时签字把 `BASE_URL` 指向容器/Caddy origin
-（如 `https://localhost:8443`）即可复用同一份脚本，无需另写 Playwright。
+**M9 复用**：M9 运行时签字在 Docker 环境用同一份脚本跑通（2026-11-28，见
+[docs/operations.md](docs/operations.md)「M9 运行时签字」）。注意 Web 由 `next start`
+（`:3000`）提供，Caddy 只做 WS/TLS 入口，不直接服务 Web 页面；`BASE_URL` 始终指
+向 Web 自身（如 `http://localhost:3000`），WS 地址是构建时内联的
+`NEXT_PUBLIC_WS_URL`（如 `wss://localhost:8443/ws`），且 `ALLOWED_ORIGINS` 必须
+包含 Web 的 origin，内部 CA 场景下 Playwright 需 `ignoreHTTPSErrors`。
 
 MVP 不强制覆盖率数字；自 2026-11-27 起以 `npm run coverage` 度量（advisory，无门槛），
 基线 87.84% 行覆盖（按包见 [docs/status.md](docs/status.md)），高风险盲区已补测并登记在技术债表
