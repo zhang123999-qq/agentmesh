@@ -936,7 +936,13 @@ export class TasksService {
           budget,
           status,
           publishedBy: actor.agentId,
-          deadline,
+          // Domain contract (US-021B P2): producers omit absent optional
+          // fields — an explicit `null` is rejected by the payload schemas
+          // (`taskPublishedPayloadSchema`), so a title-only publish must not
+          // carry `deadline: null` on the wire. Same spread pattern as
+          // `biddingDeadline` / `parentId` below. The reducer reads
+          // defensively, so replay is unaffected either way.
+          ...(deadline === null ? {} : { deadline }),
           ...(biddingDeadline === null ? {} : { biddingDeadline }),
           ...(parentId === null ? {} : { parentId }),
           createdAt,

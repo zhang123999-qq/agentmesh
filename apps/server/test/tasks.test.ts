@@ -244,6 +244,40 @@ describe('task.publish', () => {
     });
   });
 
+  it('task.published omits absent optional fields (no null deadline on the wire)', async () => {
+    const h = makeHarness();
+    const root = await h.register('root', 'admin');
+
+    // Title-only publish: no deadline / biddingDeadline / parentId given.
+    const result = resultOf<PublishResult>(
+      await publish(h, root.token, { title: 'title only' }),
+    );
+    const log = h.events.loadAggregate(`task:${result.task.id}`);
+    expect(log.map((event) => event.type)).toEqual(['task.published']);
+    const payload = log[0]?.payload as Record<string, unknown>;
+    // Domain contract (US-021B P2): producers omit, never write null —
+    // the SDK's taskPublishedPayloadSchema rejects explicit nulls, so a
+    // `deadline: null` here would silently drop the live push (F2r-sdk).
+    expect(payload).not.toHaveProperty('deadline');
+    expect(payload).not.toHaveProperty('biddingDeadline');
+    expect(payload).not.toHaveProperty('parentId');
+    expect(payload).toMatchObject({
+      title: 'title only',
+      description: '',
+      requiredSkills: [],
+      budget: 0,
+      status: 'open',
+    });
+
+    // Replay still rebuilds the same projection without a deadline.
+    expect(replayTask(h, result.task.id)).toMatchObject({
+      exists: true,
+      title: 'title only',
+      status: 'open',
+      deadline: null,
+    });
+  });
+
   it('rejects non-admin callers with -32002 and anonymous callers with -32001', async () => {
     const h = makeHarness();
     const worker = await h.register('worker');
