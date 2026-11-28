@@ -2,25 +2,39 @@ import {
   METHODS,
   PROTOCOL_VERSION,
   createJsonRpcRequest,
+  isDomainOnlyEventType,
   isNotificationEventType,
   isProtocolVersionCompatible,
   nextJsonRpcId,
   presenceUpdatePayloadSchema,
+  safeParseDomainEventNotification,
   safeParseEventNotification,
+  type AccountAuthenticatedPayload,
+  type AccountRegisteredPayload,
   type AgentRevokeTokenParams,
   type AgentRevokeTokenResult,
+  type ChannelCreatedPayload,
+  type ChannelMemberJoinedPayload,
+  type ChannelMemberLeftPayload,
+  type DomainEventNotification,
   type EventNotification,
   type JsonRpcParams,
+  type MessageCreatedPayload,
   type MessageHistoryParams,
   type PresenceUpdatePayload,
   type TaskAwardParams,
   type TaskBidParams,
+  type TaskBidPlacedPayload,
   type TaskCancelParams,
+  type TaskCompactionCompletedPayload,
   type TaskCompleteParams,
   type TaskFailParams,
   type TaskProgressParams,
+  type TaskProgressReportedPayload,
+  type TaskPublishedPayload,
   type TaskReassignParams,
   type TaskReviewParams,
+  type TaskStatusChangedPayload,
   type WorkspaceCreateParams,
   type WorkspaceCreateResult,
   type WorkspaceDisableParams,
@@ -179,10 +193,26 @@ export interface EventPayloadMap {
     agentId?: string;
     detail?: unknown;
   };
+  // Domain-only events, pushed to `system.subscribe` sessions with
+  // `includeDomainEvents: true`. Same `on()` handlers as notifications.
+  'account.registered': AccountRegisteredPayload;
+  'account.authenticated': AccountAuthenticatedPayload;
+  'channel.created': ChannelCreatedPayload;
+  'channel.member.joined': ChannelMemberJoinedPayload;
+  'channel.member.left': ChannelMemberLeftPayload;
+  'message.created': MessageCreatedPayload;
+  'task.published': TaskPublishedPayload;
+  'task.status.changed': TaskStatusChangedPayload;
+  'task.bid.placed': TaskBidPlacedPayload;
+  'task.progress.reported': TaskProgressReportedPayload;
+  'task.compaction.completed': TaskCompactionCompletedPayload;
 }
 
 export type EventName = keyof EventPayloadMap;
-type EventHandler = (payload: unknown, envelope?: EventNotification) => void;
+type EventHandler = (
+  payload: unknown,
+  envelope?: EventNotification | DomainEventNotification,
+) => void;
 type ConnectionHandler = (event: ConnectionEvent) => void;
 
 interface PendingRequest {
@@ -196,6 +226,12 @@ interface WelcomeWaiter {
   readonly resolve: () => void;
   readonly reject: (error: unknown) => void;
   readonly timer: ReturnType<typeof setTimeout>;
+}
+
+interface OpenWaiter {
+  readonly resolve: () => void;
+  readonly reject: (error: unknown) => void;
+  timer: ReturnType<typeof setTimeout> | undefined;
 }
 
 interface ControlFrame {
@@ -260,6 +296,7 @@ export class AgentMeshClient {
   readonly #eventHandlers = new Map<string, Set<EventHandler>>();
   readonly #connectionHandlers = new Set<ConnectionHandler>();
   readonly #welcomeWaiters: WelcomeWaiter[] = [];
+  readonly #openWaiters: OpenWaiter[] = [];
 
   constructor(options: AgentMeshClientOptions) {
     this.#url = options.url;
@@ -302,6 +339,11 @@ export class AgentMeshClient {
       this.#token === undefined
         ? undefined
         : this.#waitForWelcome();
+    // `welcome` must never become an unhandled rejection: if the transport
+    // fails first (auth failure, early close), `connect()` exits through
+    // `#waitForOpen` without ever awaiting it. The no-op handler marks it
+    // handled; awaiting it later still throws the original error.
+    welcome?.catch(() => {});
     const transport = this.#factory(
       this.#url,
       {},
@@ -355,7 +397,10 @@ export class AgentMeshClient {
 
   on<T extends EventName>(
     type: T,
-    handler: (payload: EventPayloadMap[T], envelope?: EventNotification) => void,
+    handler: (
+      payload: EventPayloadMap[T],
+      envelope?: EventNotification | DomainEventNotification,
+    ) => void,
   ): () => void {
     let handlers = this.#eventHandlers.get(type);
     if (handlers === undefined) {
@@ -609,6 +654,16 @@ export class AgentMeshClient {
         this.#lastSeenSeq = parsed.data.seq;
         this.#dispatch(method, parsed.data.payload, parsed.data);
       }
+      // Domain-only events, pushed to `system.subscribe` sessions with
+      // `includeDomainEvents: true`. Same envelope (global `seq`), same
+      // dedupe watermark — a domain event is an event in the same log.
+      if (isDomainOnlyEventType(method)) {
+        const parsed = safeParseDomainEventNotification(frame.params);
+        if (!parsed.success) return;
+        if (this.#lastSeenSeq >= parsed.data.seq) return;
+        this.#lastSeenSeq = parsed.data.seq;
+        this.#dispatch(method, parsed.data.payload, parsed.data);
+      }
       return;
     }
 
@@ -710,6 +765,11 @@ export class AgentMeshClient {
     this.#rejectWelcomeWaiters(
       new AgentMeshError(-32000, `Connection closed before welcome (${code})`),
     );
+    // Same failure class as #failConnection: a close during connect() must
+    // fail the open wait now, not after the 30s open timeout.
+    this.#rejectOpenWaiters(
+      new AgentMeshError(-32000, `Connection closed before open (${code})`),
+    );
     if (this.#manualClose || !this.#autoReconnect) {
       this.#setState('closed');
       return;
@@ -731,6 +791,7 @@ export class AgentMeshClient {
 
   #failConnection(error: unknown): void {
     this.#rejectWelcomeWaiters(error);
+    this.#rejectOpenWaiters(error);
     this.#emitConnection({ status: this.#state, error });
     this.#transport?.close(1000, 'failed');
     this.#transportOpen = false;
@@ -792,7 +853,11 @@ export class AgentMeshClient {
     this.#pending.clear();
   }
 
-  #dispatch(type: string, payload: unknown, envelope?: EventNotification): void {
+  #dispatch(
+    type: string,
+    payload: unknown,
+    envelope?: EventNotification | DomainEventNotification,
+  ): void {
     const handlers = this.#eventHandlers.get(type);
     if (handlers === undefined) return;
     for (const handler of [...handlers]) {
@@ -828,19 +893,36 @@ export class AgentMeshClient {
     if (this.#transportOpen) return Promise.resolve();
     return new Promise<void>((resolve, reject) => {
       const started = Date.now();
+      const waiter: OpenWaiter = { resolve, reject, timer: undefined };
       const poll = (): void => {
         if (this.#transportOpen) {
+          this.#removeOpenWaiter(waiter);
           resolve();
           return;
         }
         if (Date.now() - started > this.#requestTimeoutMs) {
+          this.#removeOpenWaiter(waiter);
           reject(new AgentMeshError(-32000, 'Timed out opening the transport'));
           return;
         }
-        setTimeout(poll, 5);
+        waiter.timer = setTimeout(poll, 5);
       };
-      setTimeout(poll, 0);
+      this.#openWaiters.push(waiter);
+      waiter.timer = setTimeout(poll, 0);
       void transport;
     });
+  }
+
+  #removeOpenWaiter(waiter: OpenWaiter): void {
+    const index = this.#openWaiters.indexOf(waiter);
+    if (index !== -1) this.#openWaiters.splice(index, 1);
+    if (waiter.timer !== undefined) clearTimeout(waiter.timer);
+  }
+
+  #rejectOpenWaiters(error: unknown): void {
+    for (const waiter of this.#openWaiters.splice(0)) {
+      if (waiter.timer !== undefined) clearTimeout(waiter.timer);
+      waiter.reject(error);
+    }
   }
 }

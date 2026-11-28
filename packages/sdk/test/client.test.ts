@@ -341,6 +341,131 @@ describe('AgentMeshClient transport', () => {
     client.close();
   });
 
+  it('dispatches domain-only events to on() handlers and advances the watermark', async () => {
+    const factory = new MockFactory();
+    const client = new AgentMeshClient({
+      url: 'ws://mock',
+      transportFactory: factory.factory,
+      autoReconnect: false,
+    });
+    const seen: string[] = [];
+    client.on('task.published', (payload) =>
+      seen.push(`published:${payload.taskId}:${payload.title}`),
+    );
+    client.on('channel.created', (payload) =>
+      seen.push(`channel:${payload.channelId}:${payload.name}`),
+    );
+    client.on('message.created', (payload) =>
+      seen.push(`message:${payload.messageId}:${payload.body}`),
+    );
+    client.on('task.status.changed', (payload) =>
+      seen.push(`status:${payload.from}->${payload.to}`),
+    );
+
+    const connecting = client.connect();
+    const transport = factory.last;
+    transport.open();
+    welcome(transport);
+    await connecting;
+
+    transport.emit(
+      notificationFrame(31, 'task.published', {
+        taskId: 'tsk_9',
+        title: 'Deep test',
+        description: 'x',
+        requiredSkills: ['go'],
+        status: 'open',
+        publishedBy: 'agt_admin',
+        createdAt: 1,
+      }),
+    );
+    transport.emit(
+      notificationFrame(32, 'channel.created', {
+        channelId: 'chn_9',
+        name: 'general',
+        createdBy: 'agt_admin',
+        createdAt: 1,
+      }),
+    );
+    transport.emit(
+      notificationFrame(33, 'message.created', {
+        messageId: 'msg_9',
+        channelId: 'chn_9',
+        senderId: 'agt_1',
+        body: 'hello',
+        createdAt: 1,
+      }),
+    );
+    transport.emit(
+      notificationFrame(34, 'task.status.changed', {
+        taskId: 'tsk_9',
+        from: 'open',
+        to: 'in_progress',
+        version: 2,
+        at: 1,
+      }),
+    );
+    // Duplicate seq is deduped, like notification events.
+    transport.emit(
+      notificationFrame(34, 'task.status.changed', {
+        taskId: 'tsk_9',
+        from: 'open',
+        to: 'in_progress',
+        version: 2,
+        at: 1,
+      }),
+    );
+
+    expect(seen).toEqual([
+      'published:tsk_9:Deep test',
+      'channel:chn_9:general',
+      'message:msg_9:hello',
+      'status:open->in_progress',
+    ]);
+    expect(client.lastSeenSeq).toBe(34);
+    client.close();
+  });
+
+  it('rejects connect() promptly with -32001 on auth failure, without an unhandled rejection', async () => {
+    const factory = new MockFactory();
+    const token = jwtWithSubject('agt_1');
+    const client = new AgentMeshClient({
+      url: 'ws://mock',
+      transportFactory: factory.factory,
+      token,
+      autoReconnect: false,
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (error: unknown): void => {
+      unhandled.push(error);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const started = Date.now();
+      const connecting = client.connect();
+      const transport = factory.last;
+      // Open the transport, then fail auth — the race the old code lost:
+      // the welcome promise rejected while #waitForOpen was still polling.
+      transport.open();
+      const auth = transport.lastRequest('agent.authenticate');
+      expect(auth).toBeDefined();
+      transport.emit({
+        jsonrpc: '2.0',
+        id: (auth as Record<string, unknown>).id,
+        error: { code: -32001, message: 'Invalid or expired token' },
+      });
+
+      await expect(connecting).rejects.toMatchObject({ code: -32001 });
+      expect(Date.now() - started).toBeLessThan(5000);
+      // Let any orphaned rejection surface.
+      await delay(50);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      client.close();
+    }
+  });
+
   it('sendRaw sends the frame verbatim', async () => {
     const factory = new MockFactory();
     const client = new AgentMeshClient({

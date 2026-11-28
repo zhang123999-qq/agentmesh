@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DOMAIN_ONLY_EVENT_TYPES,
   NOTIFICATION_EVENT_TYPES,
   eventEnvelopeSchema,
   eventNotificationSchema,
   eventPayloadSchemas,
+  getDomainEventPayloadSchema,
   getEventPayloadSchema,
+  isDomainOnlyEventType,
+  isNotificationEventType,
+  parseDomainEventNotification,
   parseEventNotification,
+  safeParseDomainEventNotification,
   type EventNotification,
 } from '../src/index.js';
 
@@ -133,6 +139,59 @@ describe('event notification payload registry', () => {
       ...baseEnvelope,
       type: 'presence.update',
       payload: { agentId: 'agent_grok', status: 'sleeping' },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('domain event notification', () => {
+  it('parses task.published with its typed payload', () => {
+    const event = parseDomainEventNotification({
+      seq: 51,
+      aggregateId: 'task:tsk_9',
+      type: 'task.published',
+      version: 1,
+      ts: 1_700_000_000_000,
+      payload: {
+        taskId: 'tsk_9',
+        title: 'Deep test',
+        requiredSkills: ['go'],
+        status: 'open',
+        publishedBy: 'agt_admin',
+        createdAt: 1_700_000_000_000,
+      },
+    });
+    if (event.type !== 'task.published') throw new Error('unreachable');
+    expect(event.payload.title).toBe('Deep test');
+    expect(event.payload.status).toBe('open');
+  });
+
+  it('parses every domain-only type through its schema', () => {
+    for (const type of DOMAIN_ONLY_EVENT_TYPES) {
+      const schema = getDomainEventPayloadSchema(type);
+      expect(schema, type).toBeDefined();
+    }
+    expect(DOMAIN_ONLY_EVENT_TYPES).toHaveLength(11);
+  });
+
+  it('classifies notification vs domain-only types without overlap', () => {
+    for (const type of NOTIFICATION_EVENT_TYPES) {
+      expect(isDomainOnlyEventType(type)).toBe(false);
+    }
+    for (const type of DOMAIN_ONLY_EVENT_TYPES) {
+      expect(isNotificationEventType(type)).toBe(false);
+      expect(isDomainOnlyEventType(type)).toBe(true);
+    }
+  });
+
+  it('rejects a domain payload that does not match its declared type', () => {
+    const result = safeParseDomainEventNotification({
+      seq: 52,
+      aggregateId: 'task:tsk_9',
+      type: 'task.status.changed',
+      version: 2,
+      ts: 1_700_000_000_000,
+      payload: { taskId: 'tsk_9', from: 'open', to: 'not-a-status' },
     });
     expect(result.success).toBe(false);
   });

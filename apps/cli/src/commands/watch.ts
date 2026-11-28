@@ -6,7 +6,7 @@
  */
 
 import type { EventName } from '@agentmesh/sdk';
-import type { EventNotification } from '@agentmesh/protocol';
+import type { DomainEventNotification, EventNotification } from '@agentmesh/protocol';
 
 import type { CommandContext } from '../context.js';
 
@@ -16,7 +16,10 @@ export interface WatchClient {
   close(): void;
   on(
     type: EventName,
-    handler: (payload: unknown, envelope?: EventNotification) => void,
+    handler: (
+      payload: unknown,
+      envelope?: EventNotification | DomainEventNotification,
+    ) => void,
   ): () => void;
 }
 

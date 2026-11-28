@@ -1,10 +1,13 @@
-import type { EventNotification } from '@agentmesh/protocol';
+import type { DomainEventNotification, EventNotification } from '@agentmesh/protocol';
 import type { EventName } from '@agentmesh/sdk';
 import { describe, expect, it } from 'vitest';
 
 import { runTaskWatch, type WatchClient } from '../src/commands/watch.js';
 
-type Handler = (payload: unknown, envelope?: EventNotification) => void;
+type Handler = (
+  payload: unknown,
+  envelope?: EventNotification | DomainEventNotification,
+) => void;
 
 class FakeWatchClient implements WatchClient {
   readonly handlers = new Map<string, Set<Handler>>();

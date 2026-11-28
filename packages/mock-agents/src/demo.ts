@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { EventStore } from '@agentmesh/core';
-import type { EventNotification } from '@agentmesh/protocol';
+import type { DomainEventNotification, EventNotification } from '@agentmesh/protocol';
 import {
   AgentMeshClient,
   VersionConflictError,
@@ -155,7 +155,10 @@ export async function runDemo(): Promise<DemoResult> {
 
     const collected: CollectedEvent[] = [];
     const record = (type: string) =>
-      (payload: unknown, envelope?: EventNotification): void => {
+      (
+        payload: unknown,
+        envelope?: EventNotification | DomainEventNotification,
+      ): void => {
         if (envelope !== undefined) {
           collected.push({ type, seq: envelope.seq, payload });
         }

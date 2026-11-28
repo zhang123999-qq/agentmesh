@@ -30,12 +30,24 @@
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
 | US-021D-followup | **完成（本地验证）** | 撤销持久化 v11：`revoked_tokens` 表 + LRU 缓存 + 启动预热（失败阻断）+ 清理定时器 + `/metrics` gauge；重启后仍失效 |
 
-测试基线：**654**
-（core 55 / protocol 109 / store **78** / sdk **22** / adapters 7 / mock-agents 1 / server **344** / cli **27** / **web 11**）。
+测试基线：**681**（2026-11-28 SDK 双 bug 修复后：+27）
+（core 55 / protocol **134** / store **78** / sdk **24** / adapters 7 / mock-agents 1 / server **344** / cli **27** / **web 11**）。
 schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本
 （**2026-11-27 生产库演练 PASS**：含租户/消息/任务/撤销表，恢复后及二次重启后撤销仍 -32001）。
-覆盖率（2026-11-27 补测后，advisory，门槛未设）：**行 87.84%**（server 92.02 / store 91.39 /
-core 91.62 / protocol 94.32 / sdk 74.12 / adapters 72.72 / mock-agents 82.85 / cli 74.33 / web 95.45）。
+覆盖率（2026-11-28，advisory，门槛未设）：**行 88.10%**（server 92.03 / store 91.39 /
+core 91.62 / protocol 95.45 / sdk 77.77 / adapters 72.72 / mock-agents 82.85 / cli 74.33 / web 95.45）。
+
+> SDK 双 bug 修复（2026-11-28，深度测试发现，见 `~/workspace/agentmesh-deep-test-report.md`）：
+> ① `system.subscribe` 的 domain 事件服务端能推、SDK 侧收不到——`#handleMessage` 只放行 notification 类型，
+> `EventPayloadMap` 也没有 domain 条目。修复：protocol 补齐 11 个 domain-only payload schema +
+> `domainEventNotificationSchema` / `isDomainOnlyEventType`，SDK `#handleMessage` 增加 domain 分支（同全局 `seq`
+> 水位线去重），`EventPayloadMap` 补 11 项；domain 可选字段用 plain `.optional()`（US-021B P2 契约，null 拒绝），
+> `domain-event-payload.test.ts` 样本补齐 8 项。
+> ② 坏 token `connect()` 竞态：鉴权失败与 `#waitForOpen` 5ms 轮询赛跑，输了就等满 30 秒报误导性 -32000，
+> 且 `welcome` promise 成孤儿未捕获 rejection 崩进程。修复：`#failConnection` / `#handleClose` 同时拒掉 open waiters
+> （`#waitForOpen` 改为 waiter 注册 + 可清 timer 的轮询），`connect()` 给 `welcome` 挂 no-op catch 防孤儿 rejection。
+> 坏 token 现立即报 -32001，无未捕获 rejection。另：`on()` 的 envelope 类型放宽为
+> `EventNotification | DomainEventNotification`，CLI watch 与 mock-agents demo 的 handler 类型同步放宽。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷

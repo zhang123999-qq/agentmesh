@@ -8,7 +8,10 @@ import {
  * Registry-driven contract for domain-only event payloads.
  *
  * Only events that have schemas in domainEventPayloadSchemas are tested here.
- * Currently: account.registered, account.authenticated, task.compaction.completed.
+ * Currently: all 11 domain-only types (account.registered,
+ * account.authenticated, channel.created, channel.member.joined,
+ * channel.member.left, message.created, task.published, task.status.changed,
+ * task.bid.placed, task.progress.reported, task.compaction.completed).
  *
  * Domain-only events follow their own schema rules as documented in
  * decisions.md (US-021B P2). Unlike notification payloads (US-021A baseline,
@@ -52,6 +55,96 @@ const DOMAIN_SAMPLES: Record<string, { base: Record<string, unknown>; optional: 
     },
     optional: {
       errors: ['error1', 'error2'],
+    },
+  },
+  'channel.created': {
+    base: {
+      channelId: 'chn_1',
+      name: 'general',
+      createdBy: 'agt_admin',
+      createdAt: 1700000000000,
+    },
+    optional: {},
+  },
+  'channel.member.joined': {
+    base: {
+      channelId: 'chn_1',
+      agentId: 'agt_1',
+      joinedAt: 1700000000000,
+    },
+    optional: {},
+  },
+  'channel.member.left': {
+    base: {
+      channelId: 'chn_1',
+      agentId: 'agt_1',
+      leftAt: 1700000000000,
+    },
+    optional: {},
+  },
+  'message.created': {
+    base: {
+      messageId: 'msg_1',
+      channelId: 'chn_1',
+      senderId: 'agt_1',
+      body: 'hello',
+      createdAt: 1700000000000,
+    },
+    optional: {},
+  },
+  'task.published': {
+    base: {
+      taskId: 'tsk_1',
+      title: 'Fix bug',
+      requiredSkills: ['go'],
+      status: 'open',
+      publishedBy: 'agt_admin',
+      createdAt: 1700000000000,
+    },
+    optional: {
+      description: 'Fix the thing',
+      budget: 100,
+      deadline: 1700000001000,
+      biddingDeadline: 1700000001000,
+      parentId: 'tsk_0',
+    },
+  },
+  'task.status.changed': {
+    base: {
+      taskId: 'tsk_1',
+      from: 'open',
+      to: 'in_progress',
+      version: 2,
+      at: 1700000000000,
+    },
+    optional: {
+      actorId: 'agt_1',
+    },
+  },
+  'task.bid.placed': {
+    base: {
+      taskId: 'tsk_1',
+      bidId: 'bid_1',
+      agentId: 'agt_1',
+      price: 50,
+    },
+    optional: {
+      eta: 60,
+      approach: 'plan first',
+      confidence: 0.9,
+      createdAt: 1700000000000,
+    },
+  },
+  'task.progress.reported': {
+    base: {
+      taskId: 'tsk_1',
+      agentId: 'agt_1',
+      progress: 50,
+    },
+    optional: {
+      note: 'halfway',
+      artifacts: ['artifact-1'],
+      at: 1700000000000,
     },
   },
 };

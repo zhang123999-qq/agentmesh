@@ -56,6 +56,11 @@ export const NOTIFICATION_EVENT_TYPES = [
  * projections/reducers input, not push payloads). `task.awarded`,
  * `task.review.decided`, `task.reassigned` are shared with the notification
  * list above because they are both logged and pushed.
+ *
+ * NOTE: "domain-only" means "no notification twin" — it does NOT mean "never
+ * pushed". The gateway pushes these to sessions that subscribed via
+ * `system.subscribe` with `includeDomainEvents: true` (see gateway
+ * `publishEvent`); the SDK dispatches them through the same `on()` handlers.
  */
 export const DOMAIN_ONLY_EVENT_TYPES = [
   'account.registered',
@@ -88,9 +93,14 @@ export const notificationEventTypeSchema = z.enum(NOTIFICATION_EVENT_TYPES);
 
 export type EventType = (typeof EVENT_TYPES)[number];
 export type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
+export type DomainOnlyEventType = (typeof DOMAIN_ONLY_EVENT_TYPES)[number];
 
 export function isNotificationEventType(type: string): type is NotificationEventType {
   return (NOTIFICATION_EVENT_TYPES as readonly string[]).includes(type);
+}
+
+export function isDomainOnlyEventType(type: string): type is DomainOnlyEventType {
+  return (DOMAIN_ONLY_EVENT_TYPES as readonly string[]).includes(type);
 }
 
 // ---------------------------------------------------------------------------
@@ -281,24 +291,161 @@ export type AccountAuthenticatedPayload = z.infer<
   typeof accountAuthenticatedPayloadSchema
 >;
 
+// ---------------------------------------------------------------------------
+// Channel / message / task (domain-only) event payloads
+// ---------------------------------------------------------------------------
+// These mirror exactly what the server appends (see apps/server/src/modules
+// channels.ts / tasks.ts). They are the payloads pushed to `system.subscribe`
+// sessions with `includeDomainEvents: true`, so the SDK can type `on()` for
+// them instead of dropping the frames.
+
+/** Written by `channel.create`. */
+export const channelCreatedPayloadSchema = z.object({
+  channelId: z.string().min(1),
+  name: z.string().min(1),
+  createdBy: z.string().min(1),
+  createdAt: z.number().int().nonnegative(),
+});
+export type ChannelCreatedPayload = z.infer<typeof channelCreatedPayloadSchema>;
+
+/** Written by `channel.join` (and by `channel.create` for the creator). */
+export const channelMemberJoinedPayloadSchema = z.object({
+  channelId: z.string().min(1),
+  agentId: z.string().min(1),
+  joinedAt: z.number().int().nonnegative(),
+});
+export type ChannelMemberJoinedPayload = z.infer<
+  typeof channelMemberJoinedPayloadSchema
+>;
+
+/** Written by `channel.leave`. */
+export const channelMemberLeftPayloadSchema = z.object({
+  channelId: z.string().min(1),
+  agentId: z.string().min(1),
+  leftAt: z.number().int().nonnegative(),
+});
+export type ChannelMemberLeftPayload = z.infer<typeof channelMemberLeftPayloadSchema>;
+
+/** Written by `message.send` (the audit twin of the `message.new` push). */
+export const messageCreatedPayloadSchema = z.object({
+  messageId: z.string().min(1),
+  channelId: z.string().min(1),
+  senderId: z.string().min(1),
+  body: z.string(),
+  createdAt: z.number().int().nonnegative(),
+});
+export type MessageCreatedPayload = z.infer<typeof messageCreatedPayloadSchema>;
+
+/**
+ * Task lifecycle states, mirroring `TASK_STATUSES` in `@agentmesh/store`
+ * (duplicated here so protocol stays dependency-free).
+ */
+export const taskStatusSchema = z.enum([
+  'draft',
+  'open',
+  'bidding',
+  'awarded',
+  'in_progress',
+  'review',
+  'done',
+  'failed',
+  'cancelled',
+]);
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
+
+/** Written by `task.publish`. Optional fields use plain `.optional()` per the
+ * domain contract (US-021B P2): producers omit them, explicit `null` is
+ * rejected — see test/domain-event-payload.test.ts. */
+export const taskPublishedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional(),
+  requiredSkills: z.array(z.string().min(1)),
+  budget: z.number().nonnegative().optional(),
+  status: taskStatusSchema,
+  publishedBy: z.string().min(1),
+  deadline: z.number().int().nonnegative().optional(),
+  biddingDeadline: z.number().int().nonnegative().optional(),
+  parentId: z.string().min(1).optional(),
+  createdAt: z.number().int().nonnegative(),
+});
+export type TaskPublishedPayload = z.infer<typeof taskPublishedPayloadSchema>;
+
+/** Written by the US-008 state machine on every lifecycle transition. */
+export const taskStatusChangedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  from: taskStatusSchema,
+  to: taskStatusSchema,
+  version: z.number().int().nonnegative(),
+  at: z.number().int().nonnegative(),
+  actorId: z.string().min(1).optional(),
+});
+export type TaskStatusChangedPayload = z.infer<typeof taskStatusChangedPayloadSchema>;
+
+/**
+ * Written by `task.bid` (the audit twin of the `task.bid.received` push).
+ * Same fields as the notification twin, but plain `.optional()` per the
+ * domain contract — the server builds one `payload` object and appends it
+ * under both types.
+ */
+export const taskBidPlacedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  bidId: z.string().min(1),
+  agentId: z.string().min(1),
+  price: z.number().nonnegative(),
+  eta: z.number().nonnegative().optional(),
+  approach: z.string().optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  createdAt: z.number().int().nonnegative().optional(),
+});
+export type TaskBidPlacedPayload = z.infer<typeof taskBidPlacedPayloadSchema>;
+
+/**
+ * Written by `task.progress` (the audit twin of `task.progress.updated`).
+ * Same fields as the notification twin, but plain `.optional()` per the
+ * domain contract — both cases share one reducer branch.
+ */
+export const taskProgressReportedPayloadSchema = z.object({
+  taskId: z.string().min(1),
+  agentId: z.string().min(1),
+  progress: z.number().min(0).max(100),
+  note: z.string().optional(),
+  artifacts: z.array(z.string()).optional(),
+  at: z.number().int().nonnegative().optional(),
+});
+export type TaskProgressReportedPayload = z.infer<
+  typeof taskProgressReportedPayloadSchema
+>;
+
 /**
  * Payload schema per domain-only event type.
  *
- * Only events consumed by a feature module that exists today are listed; the
- * map grows as modules land. Reducers still read payloads defensively, so an
- * unlisted (legacy) type never breaks replay.
+ * Every type in `DOMAIN_ONLY_EVENT_TYPES` is listed: these are the payloads
+ * pushed to `system.subscribe` sessions with `includeDomainEvents: true`,
+ * so the SDK can validate and type them instead of dropping the frames.
  */
 export const taskCompactionCompletedPayloadSchema = z.object({
   compactedTasks: z.number().int().nonnegative(),
   totalRemoved: z.number().int().nonnegative(),
   errors: z.array(z.string()).optional(),
 });
+export type TaskCompactionCompletedPayload = z.infer<
+  typeof taskCompactionCompletedPayloadSchema
+>;
 
 export const domainEventPayloadSchemas = {
   'account.registered': accountRegisteredPayloadSchema,
   'account.authenticated': accountAuthenticatedPayloadSchema,
+  'channel.created': channelCreatedPayloadSchema,
+  'channel.member.joined': channelMemberJoinedPayloadSchema,
+  'channel.member.left': channelMemberLeftPayloadSchema,
+  'message.created': messageCreatedPayloadSchema,
+  'task.published': taskPublishedPayloadSchema,
+  'task.status.changed': taskStatusChangedPayloadSchema,
+  'task.bid.placed': taskBidPlacedPayloadSchema,
+  'task.progress.reported': taskProgressReportedPayloadSchema,
   'task.compaction.completed': taskCompactionCompletedPayloadSchema,
-} satisfies Partial<Record<EventType, z.ZodTypeAny>>;
+} satisfies Record<DomainOnlyEventType, z.ZodTypeAny>;
 
 export function getDomainEventPayloadSchema(type: string): z.ZodTypeAny | undefined {
   return (domainEventPayloadSchemas as Record<string, z.ZodTypeAny | undefined>)[type];
@@ -381,7 +528,7 @@ export function safeParseEventEnvelope(
 // Event notification (envelope + typed payload, discriminated by `type`)
 // ---------------------------------------------------------------------------
 
-function eventNotificationOf<K extends NotificationEventType, T extends z.ZodTypeAny>(
+function eventNotificationOf<K extends EventType, T extends z.ZodTypeAny>(
   type: K,
   payload: T,
 ) {
@@ -421,4 +568,40 @@ export function safeParseEventNotification(
   input: unknown,
 ): z.ZodSafeParseResult<EventNotification> {
   return eventNotificationSchema.safeParse(input);
+}
+
+// ---------------------------------------------------------------------------
+// Domain event notification (envelope + typed payload, discriminated by `type`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The exact shape of a domain-only `event` notification pushed to subscribed
+ * sessions (`system.subscribe` with `includeDomainEvents: true`). Same wire
+ * format as `eventNotificationSchema` — the envelope with the global `seq` —
+ * only the `type` (and therefore the payload) differs.
+ */
+export const domainEventNotificationSchema = z.discriminatedUnion('type', [
+  eventNotificationOf('account.registered', accountRegisteredPayloadSchema),
+  eventNotificationOf('account.authenticated', accountAuthenticatedPayloadSchema),
+  eventNotificationOf('channel.created', channelCreatedPayloadSchema),
+  eventNotificationOf('channel.member.joined', channelMemberJoinedPayloadSchema),
+  eventNotificationOf('channel.member.left', channelMemberLeftPayloadSchema),
+  eventNotificationOf('message.created', messageCreatedPayloadSchema),
+  eventNotificationOf('task.published', taskPublishedPayloadSchema),
+  eventNotificationOf('task.status.changed', taskStatusChangedPayloadSchema),
+  eventNotificationOf('task.bid.placed', taskBidPlacedPayloadSchema),
+  eventNotificationOf('task.progress.reported', taskProgressReportedPayloadSchema),
+  eventNotificationOf('task.compaction.completed', taskCompactionCompletedPayloadSchema),
+]);
+
+export type DomainEventNotification = z.infer<typeof domainEventNotificationSchema>;
+
+export function parseDomainEventNotification(input: unknown): DomainEventNotification {
+  return domainEventNotificationSchema.parse(input);
+}
+
+export function safeParseDomainEventNotification(
+  input: unknown,
+): z.ZodSafeParseResult<DomainEventNotification> {
+  return domainEventNotificationSchema.safeParse(input);
 }
