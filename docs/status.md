@@ -70,7 +70,9 @@ core 91.62 / protocol 95.45 / sdk 78.48 / adapters 72.72 / mock-agents 82.85 / c
 > （`apps/web/src/lib/session.ts`，`agentmesh.session.v1`，读时校验 claims 与过期）；`SdkProvider` 启动时恢复，
 > 恢复中 `authRestoring` 让 dashboard 显示“正在恢复登录…”而不闪登录提示；-32001（过期/撤销）时丢弃旧会话；
 > 4401 关闭同样清掉存储会话；登出清掉。dashboard 的自动重连只在 `isAdmin` 时触发（撤销后不再对死 token 重连）。
-> 三项共 +13 测试（695），本地门全绿，01 实栈复验待跑。
+> 三项共 +13 测试（695），本地门全绿。01 实栈复验（2026-11-28 12:57，部署 f35ffe5）：
+> retest 21/22（H1r 按新预期 PASS：撤销后 live session 被杀、fresh connect -32001 0 秒；
+> 唯一 FAIL 仍是预期内的 G2r）、CLI 37/37、Web 深测 3/3（刷新后登录保持，676ms 恢复）。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷
