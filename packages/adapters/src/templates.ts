@@ -1,4 +1,6 @@
 import { BaseAgentAdapter } from './base-adapter.js';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { OpenAIAdapter, type OpenAIAdapterConfig } from './openai-adapter.js';
 import type { AdapterDependencies, AgentAdapterConfig } from './types.js';
 
 function requireString(value: unknown, field: string): string {
@@ -83,3 +85,5 @@ export class CodexAdapter extends BaseAgentAdapter {
     this.sandboxId = requireString(config.sandboxId, 'sandboxId');
   }
 }
+
+export { OpenAIAdapter, type OpenAIAdapterConfig } from './openai-adapter.js';

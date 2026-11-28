@@ -1192,3 +1192,28 @@ v10→v11 迁移前 backup + 建表；config 接线启定时器 + `/metrics` gau
 - [ ] Linux 环境下复测（生产环境代表性）
 - [ ] 多 worker 并发竞标测试（需预建多个带技能的 worker 账号）
 
+## OpenAI 兼容适配器实现（2026-11-28）
+
+### 实现前决策（4 项）
+
+| # | 决策项 | 选择 | 理由 |
+|---|--------|------|------|
+| 1 | Provider 选型 | **OpenAI 兼容接口** | 支持 OpenAI、DeepSeek、Kimi、Ollama 等，标准化程度最高 |
+| 2 | 凭据管理 | **环境变量 `OPENAI_API_KEY` / `OPENAI_BASE_URL`** | 不落盘、不入库、不打入镜像，CI 可通过 mock 覆盖 |
+| 3 | 交互闭环 | **方案 A：LLM 生成纯文本作为 artifacts** | 安全优先，不引入沙箱/代码执行风险，MVP 可用 |
+| 4 | 进度上报 | **粗粒度：调用前 0%，调用后 100%** | 实现简单，不引入 SSE/流式复杂度，后续可扩展 |
+
+### 实现约束
+- 在 `packages/adapters/src/openai-adapter.ts` 新增 `OpenAIAdapter`，继承 `BaseAgentAdapter`
+- 复写 `#guardExecution` 或新增 `onTaskAssigned` 处理逻辑，在任务分配时：
+  1. 从 SDK 获取任务详情
+  2. 组装 Prompt（任务描述、技能要求、频道上下文）
+  3. 调用 LLM API（fetch，60s 超时，指数退避重试 3 次）
+  4. 成功后：`task.progress` 100% → `task.complete`，生成结果写入 artifacts
+  5. 失败时：`task.fail` 上报
+- 测试：使用 `nock` 或 mock `fetch` 拦截网络请求，测试 Prompt 拼接、超时处理、异常回退
+- 环境变量：`OPENAI_API_KEY`（必填）、`OPENAI_BASE_URL`（可选）、`OPENAI_MODEL`（可选，默认 gpt-4o-mini）、`OPENAI_TIMEOUT_MS`（可选，默认 60000）
+
+### 交付
+- `OpenAIAdapter` 代码 + 单元测试（mock fetch）+ `demo:real` 脚本 + 文档更新
+
