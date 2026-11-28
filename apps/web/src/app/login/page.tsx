@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSdk } from '@/lib/sdk-provider';
+import { saveSession } from '@/lib/session';
 import { useToast } from '@/lib/toast';
 import { mapLoginError } from '@/lib/admin-errors';
 
@@ -56,6 +57,11 @@ export default function LoginPage() {
       // Record the authenticated session so the dashboard layout stops showing
       // "please log in" and renders the admin navigation.
       markAuthenticated(result.agentId, result.role);
+      // Persist the issued JWT so a refresh restores the login instead of
+      // dropping it (the secret itself is never stored).
+      if (result.token !== undefined) {
+        saveSession({ token: result.token, agentId: result.agentId, role: result.role });
+      }
       showToast(`登录成功：${result.agentId}`, 'success');
       router.push(redirectTo);
       router.refresh();

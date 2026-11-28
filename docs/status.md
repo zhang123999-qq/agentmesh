@@ -21,7 +21,7 @@
 | US-021B | **完成（本地验证，P1 已核实并修复空转 bug）** | 定时 compaction：OR-Set tombstone 清理，默认关闭，可配置间隔，优雅关闭清理；`verify:docker` 显式断言定时器 start/clear |
 | US-021G | **完成（本地验证 + e2e 已执行，2026-11-28）** | Web 测试基线：单元 7 + 集成 4 纳入 verify；e2e 脚本已在 InstaBox 01 真实栈上跑通 2/2（登录页渲染 + 登录→建频道→发消息可见），M9 第 10 项同证 |
 | US-021C | **完成（本地验证）** | 事件哈希链定期校验：分批 verify、启动一次 + 定时（默认 1h）、`/health.hashChain`、verify:docker 定时器断言 |
-| US-021D | **完成（本地验证）** | token 撤销：`agent.revokeToken`（admin，23/23）、进程内 LRU + verify 校验、重启不保留（文档） |
+| US-021D | **完成（本地验证）** | token 撤销：`agent.revokeToken`（admin，23/23）、进程内 LRU + verify 校验、重启不保留（文档）；2026-11-28 起撤销同时关闭已建 live 会话（4401 `token_revoked`，见下） |
 | US-021E | **已锁死（2026-11-23）** | 多租户设计：workspace 一等公民、23 RPC 归属表、presence 隔离、拆 US-022…025 |
 | US-021F | **评估完成：仍不做** | SQLCipher：现状/触发/成本/风险/复审条件已记 decisions.md |
 | US-022 | **完成（本地验证）** | v9 多租户 schema：`workspaces` 表 + seed default；`channel_members` PK 加 workspace 维度；无回填；前向不可逆（先备份） |
@@ -30,12 +30,12 @@
 | US-025 | **完成（本地验证）** | 租户生命周期：`workspace.create/list/disable`（平台 admin，26/26）+ 邀请码登记 + `workspace_admin` 角色 + 配额 -32008 + 禁用拒新 auth；v10 迁移 |
 | US-021D-followup | **完成（本地验证）** | 撤销持久化 v11：`revoked_tokens` 表 + LRU 缓存 + 启动预热（失败阻断）+ 清理定时器 + `/metrics` gauge；重启后仍失效 |
 
-测试基线：**682**（2026-11-28 SDK 双 bug 修复后：+28）
-（core 55 / protocol **134** / store **78** / sdk **24** / adapters 7 / mock-agents 1 / server **345** / cli **27** / **web 11**）。
+测试基线：**695**（2026-11-28 三个次要发现修复后：+13）
+（core 55 / protocol **134** / store **78** / sdk **26** / adapters 7 / mock-agents 1 / server **348** / cli **27** / **web 19**）。
 schema 版本：**v11**（撤销持久化）。RPC **26/26**。可观测：`/metrics`。备份：迁移前自动备份 + 恢复演练脚本
 （**2026-11-27 生产库演练 PASS**：含租户/消息/任务/撤销表，恢复后及二次重启后撤销仍 -32001）。
-覆盖率（2026-11-28，advisory，门槛未设）：**行 88.10%**（server 92.03 / store 91.39 /
-core 91.62 / protocol 95.45 / sdk 77.77 / adapters 72.72 / mock-agents 82.85 / cli 74.33 / web 95.45）。
+覆盖率（2026-11-28，advisory，门槛未设）：**行 88.15%**（server 92.09 / store 91.39 /
+core 91.62 / protocol 95.45 / sdk 78.48 / adapters 72.72 / mock-agents 82.85 / cli 74.33 / web 89.06）。
 
 > SDK 双 bug 修复（2026-11-28，深度测试发现，见 `~/workspace/agentmesh-deep-test-report.md`）：
 > ① `system.subscribe` 的 domain 事件服务端能推、SDK 侧收不到——`#handleMessage` 只放行 notification 类型，
@@ -55,6 +55,22 @@ core 91.62 / protocol 95.45 / sdk 77.77 / adapters 72.72 / mock-agents 82.85 / c
 > spread 省略写法（`...(deadline === null ? {} : { deadline })`），并补服务端测试 pin 住「无 deadline 的发布事件里没有
 > deadline / biddingDeadline / parentId 三个字段、replay 仍为 deadline: null」。历史事件行里的 `deadline: null`
 > 不影响 replay（reducer 防御读取），且 domain 事件只 live 推送、不参与 resume 回放。
+
+> 三个次要发现修复（2026-11-28，深度测试遗留，用户令全部修复）：
+> ① 撤销 token 不杀已建会话：`TokenRevocationRegistry` 新增 `onRevoked` 订阅（监听抛错不破坏撤销本身），
+> `app.ts` 在网关创建后订阅；网关新增 `terminateSessionsByTokenId(jti)`，按 `session.auth.tokenId`
+> （`AuthContext` 新增可选 `tokenId`，`verify` 本就返回 `jti`；在带内 register/authenticate 后网关会校验新发
+> token 并绑定会话，所以 secret 登录的会话也带有所发 token 的 `jti`）关闭匹配 socket（4401 `token_revoked`）。
+> SDK 侧：4401 关闭为终态（不重连，`closed` 事件带 -32001 错）；`#failConnection` 的 -32001 / -32006
+> 同样置终态，防止拿已撤销 token 重连死循环；显式 `connect()` 会清终态（重登新 token 可用）。
+> ② cancel 状态表与实现不一致：`TASK_TRANSITIONS` 补 `in_progress → cancelled` 与 `review → cancelled`
+> 两条边，与 admin `task.cancel`（`isCancellableStatus`）一致；`awarded` 仍不可直接取消（移交中，只能
+> `failed` / reassign）。模块注释与 `tasks.test.ts` 同步改写（旧测试曾断言 transition 拒掉这两条边）。
+> ③ Web 刷新掉登录：登录页在 admin 鉴权成功后把服务端新发的 JWT（不存 secret）存 `localStorage`
+> （`apps/web/src/lib/session.ts`，`agentmesh.session.v1`，读时校验 claims 与过期）；`SdkProvider` 启动时恢复，
+> 恢复中 `authRestoring` 让 dashboard 显示“正在恢复登录…”而不闪登录提示；-32001（过期/撤销）时丢弃旧会话；
+> 4401 关闭同样清掉存储会话；登出清掉。dashboard 的自动重连只在 `isAdmin` 时触发（撤销后不再对死 token 重连）。
+> 三项共 +13 测试（695），本地门全绿，01 实栈复验待跑。
 
 > CI（2026-11-23）：GitHub Actions `verify` + `web-e2e`（真实登录→频道→发消息）+ `docker`
 > （Linux SIGTERM 定时器清理）全绿；`audit-cron` 定时跑。CI 暴露并修复了 4 个真实缺陷

@@ -21,15 +21,16 @@
  * draft → open → bidding → awarded → in_progress → review → done
  *                  ↓         ↓          ↓            ↓
  *               failed    failed     failed       failed
- * open → cancelled        (MVP cancel branch, see below)
+ * open → cancelled        (admin cancel, see below)
  * ```
  *
- * **Cancel policy (MVP, per US-008 notes).** Only `open` tasks may be
- * cancelled. `awarded`/`in_progress`/`review` tasks are "owned" by an agent
- * (and `bidding` is mid-auction), so they exit through `failed` or through the
- * US-013 reassign / human-takeover path — never through a plain `cancel`
- * (that extension is US-022+). The table therefore has exactly one
- * `→ cancelled` edge.
+ * **Cancel policy.** Admin `task.cancel` may cancel a task in `open`,
+ * `bidding`, `in_progress` or `review` — the same four edges the table
+ * carries as `→ cancelled`, so the table and the RPC agree (the table is
+ * the single source of truth; `cancel()` is gated by
+ * `isCancellableStatus`, which mirrors it). `awarded` tasks are "owned"
+ * by an agent mid-handover, so they exit through `failed` or through the
+ * US-013 reassign / human-takeover path — never through a plain `cancel`.
  *
  * ## CAS + event log
  *
@@ -130,8 +131,8 @@ export const TASK_TRANSITIONS: Readonly<Record<TaskStatus, readonly TaskStatus[]
     open: ['bidding', 'cancelled'],
     bidding: ['awarded', 'failed', 'cancelled'],
     awarded: ['in_progress', 'failed'],
-    in_progress: ['review', 'failed'],
-    review: ['done', 'failed', 'in_progress'],
+    in_progress: ['review', 'failed', 'cancelled'],
+    review: ['done', 'failed', 'in_progress', 'cancelled'],
     done: [],
     failed: [],
     cancelled: [],

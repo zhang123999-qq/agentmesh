@@ -90,6 +90,16 @@ export interface ConnectionEvent {
   readonly error?: unknown;
 }
 
+/**
+ * WebSocket close code the server uses when a socket's token was revoked
+ * (or was never valid). Same value as the server's `WS_CLOSE_UNAUTHORIZED`
+ * (private-use range 4000–4999); kept in sync by the revoke tests.
+ */
+const WS_CLOSE_UNAUTHORIZED = 4401;
+
+/** Auth failures that can never succeed on retry with the same credentials. */
+const TERMINAL_AUTH_CODES = new Set([-32001, -32006]);
+
 export interface AgentMeshClientOptions {
   readonly url: string;
   /** Defaults to the browser global WebSocket. Inject a `ws` adapter for Node. */
@@ -285,6 +295,12 @@ export class AgentMeshClient {
   #transport?: ClientTransport;
   #transportOpen = false;
   #manualClose = false;
+  /**
+   * True once the connection failed for a reason retrying cannot fix
+   * (revoked/invalid token, protocol mismatch). Suppresses auto-reconnect;
+   * an explicit `connect()` clears it.
+   */
+  #authTerminal = false;
   #state: ConnectionStatus = 'closed';
   #reconnectTimer?: ReturnType<typeof setTimeout>;
   #token?: string;
@@ -329,6 +345,9 @@ export class AgentMeshClient {
   async connect(): Promise<void> {
     if (this.#transportOpen) return;
     this.#manualClose = false;
+    // An explicit connect() is a fresh attempt (e.g. after logging in again
+    // with a new token); clear any terminal auth failure from before.
+    this.#authTerminal = false;
     if (this.#reconnectTimer !== undefined) {
       clearTimeout(this.#reconnectTimer);
       this.#reconnectTimer = undefined;
@@ -770,7 +789,22 @@ export class AgentMeshClient {
     this.#rejectOpenWaiters(
       new AgentMeshError(-32000, `Connection closed before open (${code})`),
     );
-    if (this.#manualClose || !this.#autoReconnect) {
+    if (code === WS_CLOSE_UNAUTHORIZED) {
+      // The server revoked this socket's token (or it was never valid):
+      // retrying with the same credentials can never succeed, so stop here
+      // instead of reconnect-looping. The error lets the UI offer a re-login.
+      this.#authTerminal = true;
+      this.#state = 'closed';
+      this.#emitConnection({
+        status: 'closed',
+        error: new AgentMeshError(
+          -32001,
+          `Token revoked (${reason || 'unauthorized'})`,
+        ),
+      });
+      return;
+    }
+    if (this.#manualClose || this.#authTerminal || !this.#autoReconnect) {
       this.#setState('closed');
       return;
     }
@@ -779,7 +813,7 @@ export class AgentMeshClient {
   }
 
   #scheduleReconnect(): void {
-    if (this.#manualClose || !this.#autoReconnect) return;
+    if (this.#manualClose || this.#authTerminal || !this.#autoReconnect) return;
     if (this.#reconnectTimer !== undefined) return;
     this.#reconnectTimer = setTimeout(() => {
       this.#reconnectTimer = undefined;
@@ -790,6 +824,15 @@ export class AgentMeshClient {
   }
 
   #failConnection(error: unknown): void {
+    // A deterministic auth/config failure (revoked token, protocol
+    // mismatch) can never succeed on retry: mark it terminal so the
+    // following close does not schedule a reconnect loop.
+    if (
+      error instanceof AgentMeshError &&
+      TERMINAL_AUTH_CODES.has(error.code)
+    ) {
+      this.#authTerminal = true;
+    }
     this.#rejectWelcomeWaiters(error);
     this.#rejectOpenWaiters(error);
     this.#emitConnection({ status: this.#state, error });

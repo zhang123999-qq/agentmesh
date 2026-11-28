@@ -332,6 +332,29 @@ export class WsGateway {
     return [...(this.#connections.get(workspaceId)?.keys() ?? [])].sort();
   }
 
+  /**
+   * Terminate every live session authenticated with the given token `jti`
+   * (revocation takes effect immediately, not at token expiry). Each socket
+   * is closed with 4401 `token_revoked`; returns how many were terminated.
+   * Sessions bound by secret (no token) are never matched by a `jti`.
+   */
+  terminateSessionsByTokenId(jti: string): number {
+    let terminated = 0;
+    for (const session of [...this.#sessions]) {
+      if (session.auth?.tokenId !== jti) continue;
+      this.#logger.info({
+        sessionId: session.id,
+        agentId: session.agentId,
+        jti,
+        msg: 'ws.session.terminated.token_revoked',
+      });
+      session.markClosed();
+      session.socket.close(WS_CLOSE_UNAUTHORIZED, 'token_revoked');
+      terminated += 1;
+    }
+    return terminated;
+  }
+
   get sessionCount(): number {
     return this.#sessions.size;
   }

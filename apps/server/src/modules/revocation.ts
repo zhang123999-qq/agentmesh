@@ -6,6 +6,11 @@
  * derives `jti`/`exp` from it and never logs the token. The actual rejection
  * happens inside `TokenService.verify` (shared by the WS gateway and the HTTP
  * dispatcher), so a revoked token fails uniformly with `-32001`.
+ *
+ * Revocation also takes effect immediately on live sessions: the registry
+ * notifies the WS gateway (wired in `app.ts`), which terminates every socket
+ * authenticated with that token (4401 `token_revoked`). A revoked token can
+ * no longer be used to open a session, and an already-open one is closed.
  */
 import {
   agentRevokeTokenParamsSchema,

@@ -45,6 +45,11 @@ export interface AuthContext {
   readonly workspaceId?: string;
   /** Epoch seconds; present when the identity came from a JWT. */
   readonly expiresAt?: number;
+  /**
+   * JWT `jti`, present when the identity came from a token. The WS gateway
+   * uses it to terminate live sessions when that token is revoked.
+   */
+  readonly tokenId?: string;
 }
 
 /**

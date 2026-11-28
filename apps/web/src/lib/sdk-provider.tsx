@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { AgentMeshClient, type ConnectionStatus, type EventName } from '@agentmesh/sdk';
+import { clearSession, isAuthError, loadSession } from './session';
 
 interface SdkContextValue {
   client: AgentMeshClient | null;
@@ -12,6 +13,8 @@ interface SdkContextValue {
   markAuthenticated: (agentId: string, role: string) => void;
   isAdmin: boolean;
   agentId: string | null;
+  /** True while a stored session is being restored on mount. */
+  authRestoring: boolean;
 }
 
 const SdkContext = createContext<SdkContextValue | null>(null);
@@ -33,25 +36,64 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
   const [status, setStatus] = useState<ConnectionStatus>('closed');
   const [isAdmin, setIsAdmin] = useState(false);
   const [agentId, setAgentId] = useState<string | null>(null);
+  const [authRestoring, setAuthRestoring] = useState(true);
+
+  /**
+   * Shared connection handler (mount client and login-created clients alike):
+   * track status, and when the server ends the session for a revoked token
+   * (4401 → -32001), drop the stored session so the next visit does not
+   * retry a dead token, and fall back to the login page. Transient drops
+   * (no -32001 error) keep the stored session for the auto-reconnect.
+   */
+  const attachConnectionHandler = (client: AgentMeshClient): (() => void) =>
+    client.onConnection((evt) => {
+      setStatus(evt.status);
+      if (evt.status === 'closed' && isAuthError(evt.error)) {
+        clearSession();
+        setIsAdmin(false);
+        setAgentId(null);
+      }
+    });
 
   useEffect(() => {
+    // Restore a stored login (localStorage JWT) so a refresh keeps the
+    // session. A stored token that the server rejects (-32001: expired or
+    // revoked) is discarded instead of retried.
+    const stored = loadSession();
+    const token = initialToken ?? stored?.token;
     const client = new AgentMeshClient({
       url: initialUrl || '',
       autoReconnect: true,
       gapPolicy: 'auto',
-      ...(initialToken ? { token: initialToken } : {}),
+      ...(token ? { token } : {}),
     });
     clientRef.current = client;
 
-    const unsubStatus = client.onConnection((evt) => {
-      setStatus(evt.status);
-    });
+    const unsubStatus = attachConnectionHandler(client);
 
+    let cancelled = false;
     if (initialUrl) {
-      client.connect().catch(console.error);
+      client
+        .connect()
+        .then(() => {
+          if (cancelled) return;
+          if (stored !== null) {
+            setAgentId(stored.agentId);
+            setIsAdmin(stored.role === 'admin');
+          }
+          setAuthRestoring(false);
+        })
+        .catch((err: unknown) => {
+          console.error('connect failed', err);
+          if (stored !== null && isAuthError(err)) clearSession();
+          if (!cancelled) setAuthRestoring(false);
+        });
+    } else {
+      setAuthRestoring(false);
     }
 
     return () => {
+      cancelled = true;
       unsubStatus();
       client.close();
     };
@@ -69,7 +111,7 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
     });
     clientRef.current = newClient;
 
-    newClient.onConnection((evt) => setStatus(evt.status));
+    attachConnectionHandler(newClient);
 
     try {
       await newClient.connect();
@@ -83,6 +125,7 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
   };
 
   const disconnect = () => {
+    clearSession();
     clientRef.current?.close();
     setStatus('closed');
     setIsAdmin(false);
@@ -104,6 +147,7 @@ export function SdkProvider({ children, initialUrl, initialToken }: SdkProviderP
         markAuthenticated,
         isAdmin,
         agentId,
+        authRestoring,
       }}
     >
       {children}

@@ -555,13 +555,13 @@ describe('task lifecycle state machine', () => {
     expect(h.events.loadAggregate(`task:${task.id}`)).toHaveLength(6);
   });
 
-  it('allows cancel from open/bidding but not from active ownership states', async () => {
+  it('allows cancel from open/bidding/in_progress/review but not from awarded', async () => {
     const h = makeHarness();
     const root = await h.register('root', 'admin');
     const published = resultOf<PublishResult>(await publish(h, root.token, { title: 'cancel me' }));
     const taskId = published.task.id;
 
-    // open → cancelled is the single legal cancel edge, and it is logged.
+    // open → cancelled is a legal edge, and it is logged.
     const cancelled = h.service.transition(taskId, 'cancelled', {
       expectedVersion: published.task.version,
       actorId: root.agentId,
@@ -576,30 +576,47 @@ describe('task lifecycle state machine', () => {
       reason: 'no longer needed',
     });
 
-    // awarded / in_progress / review may not be cancelled directly.
-    for (const blockedFrom of ['awarded', 'in_progress', 'review'] as TaskStatus[]) {
+    // in_progress / review may be cancelled directly (table agrees with
+    // the admin cancel() RPC); awarded may not — it is mid-handover.
+    for (const cancellableFrom of ['in_progress', 'review'] as TaskStatus[]) {
       const other = resultOf<PublishResult>(
-        await publish(h, root.token, { title: `stuck in ${blockedFrom}` }),
+        await publish(h, root.token, { title: `cancellable in ${cancellableFrom}` }),
       );
       const path: TaskStatus[] = ['bidding', 'awarded', 'in_progress', 'review'];
-      const stopAt = path.indexOf(blockedFrom);
+      const stopAt = path.indexOf(cancellableFrom);
       for (let i = 0; i <= stopAt; i += 1) {
         h.service.transition(other.task.id, path[i] as TaskStatus, {
           expectedVersion: h.service.get(other.task.id).version,
         });
       }
-      const err = protocolErrorOf(() =>
-        h.service.transition(other.task.id, 'cancelled', {
-          expectedVersion: h.service.get(other.task.id).version,
-        }),
-      );
-      expect(err.code).toBe(JsonRpcErrorCode.InvalidState);
-      expect(err.data).toMatchObject({ from: blockedFrom, to: 'cancelled' });
-      expect(h.service.get(other.task.id).status).toBe(blockedFrom);
+      const done = h.service.transition(other.task.id, 'cancelled', {
+        expectedVersion: h.service.get(other.task.id).version,
+      });
+      expect(done.status).toBe('cancelled');
     }
+    const stuck = resultOf<PublishResult>(
+      await publish(h, root.token, { title: 'stuck in awarded' }),
+    );
+    h.service.transition(stuck.task.id, 'bidding', {
+      expectedVersion: h.service.get(stuck.task.id).version,
+    });
+    h.service.transition(stuck.task.id, 'awarded', {
+      expectedVersion: h.service.get(stuck.task.id).version,
+    });
+    const err = protocolErrorOf(() =>
+      h.service.transition(stuck.task.id, 'cancelled', {
+        expectedVersion: h.service.get(stuck.task.id).version,
+      }),
+    );
+    expect(err.code).toBe(JsonRpcErrorCode.InvalidState);
+    expect(err.data).toMatchObject({ from: 'awarded', to: 'cancelled' });
+    expect(h.service.get(stuck.task.id).status).toBe('awarded');
 
     // `bidding → cancelled` is the window-close edge (see closeExpiredBidding).
     expect(canTransition('bidding', 'cancelled')).toBe(true);
+    expect(canTransition('in_progress', 'cancelled')).toBe(true);
+    expect(canTransition('review', 'cancelled')).toBe(true);
+    expect(canTransition('awarded', 'cancelled')).toBe(false);
   });
 
   it('allows failed from any active state but not from a terminal one', () => {

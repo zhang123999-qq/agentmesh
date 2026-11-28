@@ -51,6 +51,21 @@ export class TokenRevocationRegistry {
     return this.#cleanedTotal;
   }
 
+  /** Listeners notified (with the revoked `jti`) after a revoke lands. */
+  readonly #revokeListeners = new Set<(jti: string) => void>();
+
+  /**
+   * Subscribe to revocations (e.g. the WS gateway, which terminates live
+   * sessions authenticated with the revoked token). Returns an unsubscribe
+   * function. A listener throwing never breaks the revoke itself.
+   */
+  onRevoked(listener: (jti: string) => void): () => void {
+    this.#revokeListeners.add(listener);
+    return () => {
+      this.#revokeListeners.delete(listener);
+    };
+  }
+
   #nowSeconds(): number {
     return Math.floor(this.#clock() / 1000);
   }
@@ -110,6 +125,17 @@ export class TokenRevocationRegistry {
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
     this.#remember(jti, expiresAt);
+    for (const listener of [...this.#revokeListeners]) {
+      try {
+        listener(jti);
+      } catch (err) {
+        this.#logger?.error?.({
+          err: err instanceof Error ? err.message : String(err),
+          jti,
+          msg: 'revoked.tokens.listener.failed',
+        });
+      }
+    }
   }
 
   /** Warm the cache from the store (startup: after migrate, before listen). */

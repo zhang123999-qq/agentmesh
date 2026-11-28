@@ -19,20 +19,32 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { status, client, isAdmin, disconnect } = useSdk();
+  const { status, client, isAdmin, disconnect, authRestoring } = useSdk();
   const { showToast } = useToast();
 
   useEffect(() => {
-    if (status === 'closed' && client) {
+    // Only reconnect while the user is still authenticated: after a logout
+    // or a revoked-token close (4401) isAdmin is false, and reconnecting
+    // would loop against a dead token.
+    if (status === 'closed' && client && isAdmin) {
       // 尝试恢复连接
       client.connect().catch(console.error);
     }
-  }, [status, client]);
+  }, [status, client, isAdmin]);
 
   const handleLogout = () => {
     disconnect();
     showToast('已登出', 'info');
   };
+
+  // While a stored session is being restored, do not flash the login prompt.
+  if (authRestoring) {
+    return (
+      <div style={{ padding: 48, textAlign: 'center' }}>
+        <p>正在恢复登录…</p>
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (

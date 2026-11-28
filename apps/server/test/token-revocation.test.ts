@@ -48,6 +48,28 @@ describe('TokenRevocationRegistry (US-021D)', () => {
     expect(reg.isRevoked('c')).toBe(true);
     expect(reg.isRevoked('b')).toBe(false);
   });
+
+  it('notifies onRevoked listeners with the revoked jti (and unsubscribe works)', () => {
+    const reg = new TokenRevocationRegistry();
+    const seen: string[] = [];
+    const off = reg.onRevoked((jti) => {
+      seen.push(jti);
+    });
+    reg.revoke('j1', 999);
+    expect(seen).toEqual(['j1']);
+    off();
+    reg.revoke('j2', 999);
+    expect(seen).toEqual(['j1']);
+  });
+
+  it('a throwing listener never breaks the revoke itself', () => {
+    const reg = new TokenRevocationRegistry();
+    reg.onRevoked(() => {
+      throw new Error('listener boom');
+    });
+    reg.revoke('j1', Math.floor(Date.now() / 1000) + 3600);
+    expect(reg.isRevoked('j1')).toBe(true);
+  });
 });
 
 describe('TokenService enforcement (US-021D)', () => {
@@ -131,6 +153,57 @@ describe('agent.revokeToken over the real server (US-021D)', () => {
     // dispatcher) now rejects the revoked token with -32001.
     await expect(app.tokens.verify(targetAuth.token)).rejects.toMatchObject({ code: -32001 });
     // Other tokens (the admin's own) still verify.
+    expect((await app.tokens.verify(adminAuth.token)).role).toBe('admin');
+  });
+
+  it('revoking a token closes its live session with 4401 and leaves other sessions alone', async () => {
+    const store = openStore(':memory:');
+    const app = await startServer({
+      config: loadConfig({
+        NODE_ENV: 'test',
+        PORT: '0',
+        HOST: '127.0.0.1',
+        DB_PATH: ':memory:',
+        JWT_SECRET,
+        LOG_LEVEL: 'silent',
+        ALLOW_ADMIN_SELF_REGISTER: 'true',
+      }),
+      logger: createLogger({ level: 'silent' }),
+      store: { db: store.db, repos: store.repos },
+    });
+    closers.push(async () => {
+      await app.close();
+      store.db.close();
+    });
+    const address = app.server.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const admin = new AgentMeshClient({ url, transportFactory: nodeTransport, autoReconnect: false });
+    closers.push(() => admin.close());
+    await admin.connect();
+    const adminAuth = await admin.register({ name: 'admin-rev2', role: 'admin' });
+
+    const target = new AgentMeshClient({ url, transportFactory: nodeTransport, autoReconnect: false });
+    closers.push(() => target.close());
+    await target.connect();
+    const targetAuth = await target.register({ name: 'target-rev2' });
+    expect(target.state).toBe('connected');
+    expect(admin.state).toBe('connected');
+
+    // Revoke the target's token via the real RPC. The gateway must terminate
+    // the target's live socket (4401 token_revoked) right away — the session
+    // is bound to the freshly minted token, so its jti matches.
+    const result = await admin.revokeToken({ targetToken: targetAuth.token });
+    expect(result.revoked).toBe(true);
+
+    const deadline = Date.now() + 3000;
+    while (target.state !== 'closed' && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(target.state).toBe('closed');
+    // The admin's own session is untouched, and so is any other token.
+    expect(admin.state).toBe('connected');
     expect((await app.tokens.verify(adminAuth.token)).role).toBe('admin');
   });
 });

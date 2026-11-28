@@ -311,6 +311,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       ...options.ws,
     });
     app.decorate('ws', gateway);
+    // Revocation kills live sessions: when a token is revoked, terminate
+    // every socket authenticated with it (4401 token_revoked) instead of
+    // leaving the session usable until the token expires.
+    revocations.onRevoked((jti) => {
+      gateway.terminateSessionsByTokenId(jti);
+    });
     systemErrorSinks.push(gateway.systemErrorNotifier);
     // `preClose` (not `onClose`) is the documented Fastify hook for transports
     // that hold the raw HTTP server open: upgraded sockets are not tracked as

@@ -466,6 +466,76 @@ describe('AgentMeshClient transport', () => {
     }
   });
 
+  it('a 4401 token_revoked close ends the session without reconnecting', async () => {
+    const factory = new MockFactory();
+    const token = jwtWithSubject('agt_1');
+    const client = new AgentMeshClient({
+      url: 'ws://mock',
+      transportFactory: factory.factory,
+      token,
+      autoReconnect: true,
+      reconnectDelayMs: 5,
+    });
+    const events: ConnectionEvent[] = [];
+    client.onConnection((event) => {
+      events.push(event);
+    });
+
+    const connecting = client.connect();
+    const transport = factory.last;
+    transport.open();
+    const auth = transport.lastRequest('agent.authenticate');
+    expect(auth).toBeDefined();
+    respond(transport, auth as Record<string, unknown>, {
+      agentId: 'agt_1',
+      token,
+      role: 'agent',
+      expiresAt: 1,
+    });
+    welcome(transport, 'epoch-1', 0);
+    await connecting;
+    expect(client.state).toBe('connected');
+
+    // The server revoked the token: 4401 must end the session, not retry.
+    transport.handlers.onClose(4401, 'token_revoked');
+    expect(client.state).toBe('closed');
+    await delay(50);
+    expect(factory.transports).toHaveLength(1);
+    expect(events.at(-1)).toMatchObject({
+      status: 'closed',
+      error: expect.objectContaining({ code: -32001 }),
+    });
+    client.close();
+  });
+
+  it('connect() with a revoked token rejects -32001 and does not reconnect-loop', async () => {
+    const factory = new MockFactory();
+    const token = jwtWithSubject('agt_1');
+    const client = new AgentMeshClient({
+      url: 'ws://mock',
+      transportFactory: factory.factory,
+      token,
+      autoReconnect: true,
+      reconnectDelayMs: 5,
+    });
+    const connecting = client.connect();
+    const transport = factory.last;
+    transport.open();
+    const auth = transport.lastRequest('agent.authenticate');
+    expect(auth).toBeDefined();
+    transport.emit({
+      jsonrpc: '2.0',
+      id: (auth as Record<string, unknown>).id,
+      error: { code: -32001, message: 'Invalid or expired token' },
+    });
+    await expect(connecting).rejects.toMatchObject({ code: -32001 });
+    // A revoked token can never succeed on retry: no second transport.
+    await delay(50);
+    expect(factory.transports).toHaveLength(1);
+    expect(client.state).toBe('closed');
+    client.close();
+  });
+
   it('sendRaw sends the frame verbatim', async () => {
     const factory = new MockFactory();
     const client = new AgentMeshClient({
